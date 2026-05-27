@@ -1,0 +1,15 @@
+# Ignorar archivos de datos pesados
+.Rhistory
+.RData
+.Ruserdata
+*.zip
+*.csv
+*.rds
+
+# Ignorar carpetas de datos completas
+data/raw/
+data/processed/
+data/
+.RDataTmp
+.Rproj.user
+.positai

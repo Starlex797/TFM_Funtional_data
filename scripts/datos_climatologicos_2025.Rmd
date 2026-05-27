@@ -1,0 +1,103 @@
+# Datos Metereologicos 
+
+
+Para el año 2025, los archicos de los datos metereológicos están estructurados de la misma forma que los datos de contaminación del mismo año. 
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(data.table)
+```
+
+# Lectura de datos 
+
+```{r}
+ruta_datos_metereo<-"C:\\Users\\HP\\Desktop\\TFM\\Base_de_datos\\Datos metereologicos\\2025\\2025_datos_metereo.csv"
+
+```
+
+
+```{r}
+limpiar_datos_metereo <- function(dt) {
+  
+  # 1. Definimos los diccionarios (Anexos I y II)
+  nombres_magnitudes <- c(
+    "80" = "Radiacion Ultravioleta", "86" = "Humedad_Relativa", 
+    "81" = "Velocidad Viento",       "87" = "Presion Barométrica", 
+    "82" = "Dir.Viento",             "88" = "Radiación Solar", 
+    "83" = "Temperatura",            "89" = "Precipitaciones"
+  )
+  
+  nombres_estaciones <- c(
+    "4"   = "Plaza España",            "54"  = "Ensanche de Vallecas",
+    "8"   = "Escuelas Aguirre",        "55"  = "Urb. Embajada (Barajas)",
+    "16"  = "Arturo Soria",            "56"  = "Plaza Elíptica",
+    "18"  = "Farolillo",               "57"  = "Sanchinarro",
+    "24"  = "Casa de Campo",           "58"  = "El Pardo",
+    "27"  = "Barajas",                 "59"  = "Juan Carlos I",
+    "35"  = "Plaza del Carmen",        "60"  = "Tres Olivos",
+    "36"  = "Moratalaz",               "102" = "J.M.D Moratalaz",
+    "38"  = "Cuatro Caminos",          "103" = "J.M.D Villaverde",
+    "39"  = "Barrio del Pilar",        "104" = "E.D.A.R La China",
+    "47"  = "Méndez Álvaro",           "106" = "Centro Mpal. De Acústica",
+    "48"  = "Pº Castellana",           "107" = "J.M.D Hortaleza",
+    "49"  = "Retiro",                  "108" = "Peñagrande",
+    "50"  = "Plaza Castilla",          "109" = "J.M.D Chamberí",
+    "110" = "J.M.D Centro",            "111" = "J.M.D Chamartín",
+    "112" = "J.M.D Vallecas 1",        "113" = "J.M.D Vallecas 2",
+    "114" = "Matadero 01",             "115" = "Matadero 02"
+  )
+  
+  # 2. Eliminamos columnas redundantes de forma segura (evita warnings si ya no existen)
+  cols_borrar <- c("PROVINCIA", "MUNICIPIO", "PUNTO_MUESTREO")
+  dt[, intersect(cols_borrar, names(dt)) := NULL]
+
+  # 3. FILTRADO CORREGIDO: Ambas condiciones dentro del mismo corchete
+  dt <- dt[MAGNITUD %in% as.numeric(names(nombres_magnitudes)) & 
+           ESTACION %in% as.numeric(names(nombres_estaciones))]
+  
+  # 4. CRITERIO DE VALIDACIÓN: Solo aceptamos código "V"
+  for (i in 1:24) {
+    h_col <- paste0("H", sprintf("%02d", i))
+    v_col <- paste0("V", sprintf("%02d", i))
+    dt[get(v_col) != "V", (h_col) := NA]
+  }
+  
+  # Conteo de NAs profesional (para que no te de error el count)
+  cols_horas <- paste0("H", sprintf("%02d", 1:24))
+  total_nas <- sum(is.na(dt[, ..cols_horas]))
+  cat("\n[INFO] NAs introducidos por validación en meteorología:", total_nas, "\n")
+  
+  # 5. SUSTITUCIÓN CORREGIDA: Cambiamos códigos por Nombres Strings
+  dt[, MAGNITUD := nombres_magnitudes[as.character(MAGNITUD)]]
+  dt[, ESTACION := nombres_estaciones[as.character(ESTACION)]] # <- ESTA ES LA LÍNEA QUE TE FALTABA
+  dt[, FECHA := as.Date(sprintf("%04d-%02d-%02d", ANO, MES, DIA))]
+  
+  # (Opcional) Borramos las columnas antiguas si ya no las necesitas
+  dt[, c("ANO", "MES", "DIA") := NULL]
+  
+  return(dt)
+}
+```
+
+```{r}
+# Paso 1: Lectura
+data_raw_metereo<- fread(ruta_datos_metereo, sep = ";")
+
+# Paso 2: Limpieza total con nuestra función
+datos_metereo_2025 <- limpiar_datos_metereo(data_raw_metereo)
+
+# Paso 3: Verificar dimensiones
+dim(datos_metereo_2025)
+names(datos_metereo_2025)
+datos_metereo_2025
+```
+```{r}
+# Crea una matriz de Estaciones (filas) vs Magnitudes (columnas)
+matriz_sensores <- table(datos_metereo_2025$ESTACION, datos_metereo_2025$MAGNITUD)
+
+# Mostrar en consola
+print(matriz_sensores) # Me explica la cantidad de dias que esas estaciones a recogido los datos
+```
+
+

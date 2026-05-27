@@ -1,0 +1,200 @@
+---
+title: "Estaciones"
+author: "Alejandro"
+date: "2026-04-26"
+output: html_document
+---
+
+# Estaciones de Contaminación 
+
+El sistema de Calidad de Aire de Madrid consta de 24 estaciones de medida repartidas por todo el área metroplotina de la ciudad de MADRID. 
+Estas estaciones son clasificadas en función de los objetivos de cada una de ellas y su ubicación: 
+1) Estaciones sub-urbanas: estas estaciones están en las afueras de la ciudad. Se instalan en zonas donde las densidades son más bajas t la vegetación es mayor.  El objetivo de estas estaciones es medir el 03. ¿Por qué? 
+El O3 se produce cuando los contaminantes que sale del tráfico o actividad empresarial, viajan hacía la periferia y por el camin, reaccionan con la luz solar hasta producir el O3. Al estar en la periferia mide los efectos de la contaminación en zonas verdes. También sirve para conocer si la contaminación está siendo estancada en el interior o está viajando a otras zonas. 
+2) Estaciones de fondo: se encuentran en ubicaciones estratégicas para representar la exposición general de la población urbana a los contaminantes. Por así decirlo, estas estaciones miden como es la calidad del aire en general en la ciudad de Madrid. Se instalan lejos de las fuentes de contaminación para asegurar que se capta la contaminación ambiental. 
+3) Estaciones de tráfico: estas estaciones están ubicadas donde la densidad de vehículos es máxima. Su objetivo es medir el impacto directo de las emisiones frescas de los tubos de escape antes de qué se dispersen. Por eso se instala en grandes artérias. 
+
+A continuación, queremos ubicar dónde se encuentran las diferentes estaciones en madrid. 
+
+```{r}
+library(tidyverse)
+library(sf)
+library(leaflet)
+library(janitor)
+library(stringr)
+
+```
+
+
+```{r}
+ruta_estaciones<-"C:\\Users\\HP\\Desktop\\TFM\\Base_de_datos\\Datos_contaminacion\\Estaciones\\datos.csv"
+ruta_estaciones_metereo<-"C:\\Users\\HP\\Desktop\\TFM\\Base_de_datos\\Datos metereologicos\\Estaciones_2019\\estaciones.csv"
+
+```
+
+
+```{r}
+# Usamos clean_names() para evitar problemas con espacios o tildes en los encabezados
+estaciones_aire <- read_delim(ruta_estaciones, 
+                              delim = ";", # Especificamos que el delimitador es una tabulación", 
+                              locale = locale(encoding = "latin1"),
+                              show_col_types = FALSE) %>%
+  clean_names()
+head(estaciones_aire) # Verificamos que se han leído correctamente los datos y los nombres de las columnas)
+
+# Limpieza de datos
+estaciones_aire <- estaciones_aire %>% select(codigo,codigo_corto,estacion,latitud,nom_tipo,longitud)
+head (estaciones_aire) # Verificamos que solo tenemos las columnas necesarias
+df_estaciones_contami<-data.frame(estaciones_aire) # Convertimos a data frame para evitar problemas con sf y leaflet
+saveRDS(df_estaciones_contami, "estaciones_contami.rds") # Guardamos el data frame para usarlo en otros scripts sin tener que leer el Excel cada vez)
+```
+
+Paso 1: Convertir la tabla en un Objeto Espacial (Simple Features)
+Tus datos originales vienen en coordenadas UTM (ETRS89), que son estupendas para calcular distancias exactas en metros, pero los mapas web interactivos prefieren coordenadas globales (Latitud y Longitud, también conocidas como WGS84).
+
+```{r}
+estaciones_mapa <- estaciones_aire %>%
+  filter(!is.na(longitud) & !is.na(latitud)) %>% # Filtramos nulos por seguridad
+  st_as_sf(coords = c("longitud", "latitud"), crs = 4326)
+
+```
+
+Paso 2: Filtrado Funcional (Enfoque TFM)
+Dado que quieres evaluar el impacto de las restricciones de Madrid 360 (que afecta principalmente a los coches), no todas las estaciones te valen igual. Las estaciones "Urbana fondo" (como la de la Casa de Campo) no reaccionarán tan rápido a las variaciones del tráfico como las de "Urbana tráfico" (como Plaza Elíptica o Escuelas Aguirre).
+
+Paso 3: Comprobación Visual (Leaflet)
+Antes de cruzar esto con los miles de puntos de tráfico, siempre hay que verificar visualmente que los datos no tengan errores absurdos (como una estación que caiga en medio del océano porque las coordenadas estaban mal tecleadas en el Excel).
+
+```{r}
+# 2. Crear una paleta de colores para clasificar visualmente
+# Le asignamos un color a cada tipo de estación
+paleta_tipos <- colorFactor(
+  palette = c("red", "blue", "green", "purple"), # Añadimos varios colores por si hay más tipos
+  domain = estaciones_mapa$nom_tipo
+)
+
+# 3. Dibujar el mapa con todas las estaciones clasificadas
+leaflet(estaciones_mapa) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    color = ~paleta_tipos(nom_tipo), # El color depende de la columna nom_tipo
+    radius = 8,
+    fillOpacity = 0.8,
+    stroke = FALSE, # Quitamos el borde para que quede más limpio
+    label = ~estacion,
+    popup = ~paste("<b>Estación:</b>", estacion, 
+                   "<br><b>Código:</b>", codigo,
+                   "<br><b>Tipo:</b>", nom_tipo) # Añadimos el tipo al popup
+  ) %>%
+  # ¡Añadimos una leyenda al mapa para que tu tribunal lo entienda perfecto!
+  addLegend(
+    position = "bottomright",
+    pal = paleta_tipos,
+    values = ~nom_tipo,
+    title = "Tipo de Estación",
+    opacity = 1
+  )
+```
+
+Todas las estaciones miden No2 pero en diferentes ubicaciones. Por ejemplo, la estación de la Casa de Campo es una estación de fondo, mientras que la estación de Plaza Elíptica es una estación de tráfico. Esto significa que ambas estaciones miden los mismos contaminantes (como NO2, PM10, O3, etc.), pero lo hacen en contextos diferentes: la Casa de Campo mide la calidad del aire en un entorno más natural y menos afectado por el tráfico, mientras que Plaza Elíptica mide la calidad del aire en una zona con alta densidad de vehículos.
+Sin embargo, hay estaciones que además de medir el NO2 ,también miden otros contaminantes. Por ejemplo, la estación de Escuelas Aguirre mide NO2, PM10, O3, entre otros contaminantes. Esto se debe a que cada estación puede estar equipada con diferentes tipos de sensores y equipos de medición, lo que les permite monitorear una variedad de contaminantes atmosféricos según las necesidades y objetivos específicos de cada ubicación.
+
+# Estaciones climatológicos 
+
+
+```{r}
+# Usamos clean_names() para evitar problemas con espacios o tildes en los encabezados
+estaciones_metereo <- read_delim(
+  ruta_estaciones_metereo, 
+  delim = ";", 
+  # Leemos como UTF-8 para las tildes, e indicamos que los decimales usan coma
+  locale = locale(encoding = "latin1", decimal_mark = ","),
+  show_col_types = FALSE
+) %>%
+  clean_names()
+```
+
+```{r}
+
+codigos_seleccionados<- c(4, 54, 8, 55, 16, 56, 18, 57, 24, 58, 27, 59, 35, 60, 36, 102, 38, 103, 39, 104, 47, 106, 48, 107, 49, 108, 50, 109, 110, 111, 112, 113, 114, 115) #2025
+#codigos_seleccionados <- c(24, 54, 59, 56, 39, 16, 36, 38) #2017
+
+# 2. Tu código, añadiendo la línea de filtro
+meteo_sf <- estaciones_metereo %>%
+  # Limpiamos filas sin coordenadas
+  filter(!is.na(coordenada_x_etrs89) & !is.na(coordenada_y_etrs89)) %>%
+  # ¡AQUÍ ESTÁ LA MAGIA DEL FILTRO! Nos quedamos solo con tu selección
+  filter(codigo_corto %in% codigos_seleccionados) %>%
+  # Especificamos crs = 25830 (ETRS89 UTM Huso 30N, oficial de Madrid)
+  st_as_sf(coords = c("coordenada_x_etrs89", "coordenada_y_etrs89"), crs = 25830) %>%
+  # Transformamos el sistema a Latitud/Longitud (EPSG:4326)
+  st_transform(crs = 4326)
+```
+
+
+# Estaciones de metereo y contaminación juntas
+
+```{r}
+paleta_tipos <- colorFactor(
+  palette = "Set1", # Usamos una paleta predefinida que distingue bien los colores
+  domain = estaciones_mapa$nom_tipo
+)
+
+# 2. Obtener la lista de tipos únicos de estaciones de aire
+tipos_aire <- unique(estaciones_mapa$nom_tipo)
+
+# 3. CREAR EL MAPA
+mapa_tfm <- leaflet() %>%
+  addTiles() # Fondo de mapa
+
+# --- CAPAS DE AIRE (Una por cada tipo) ---
+# Usamos un bucle para añadir cada tipo como un grupo separado
+for (tipo in tipos_aire) {
+  mapa_tfm <- mapa_tfm %>%
+    addCircleMarkers(
+      data = estaciones_mapa %>% filter(nom_tipo == tipo),
+      group = tipo,  # ¡Esto es lo que permite que aparezca en el control de capas!
+      color = ~paleta_tipos(nom_tipo),
+      radius = 8,
+      fillOpacity = 0.8,
+      stroke = FALSE,
+      label = ~estacion,
+      popup = ~paste("<b>Estación:</b>", estacion, 
+                     "<br><b>Código:</b>", codigo,
+                     "<br><b>Tipo:</b>", nom_tipo)
+    )
+}
+
+# --- CAPA DE METEOROLOGÍA ---
+mapa_tfm <- mapa_tfm %>%
+  addCircleMarkers(
+    data = meteo_sf,
+    color = "blue",
+    group = "Meteorología",
+    radius = 2, # La ponemos más pequeña como pedías
+    fillOpacity = 0.7,
+    label = ~estacion,
+    popup = ~paste0("<b>Tipo: Meteo</b><br>",
+                    "<b>Nombre: </b>", estacion, "<br>")
+  )
+
+# --- CONTROL DE CAPAS ---
+mapa_tfm <- mapa_tfm %>%
+  addLayersControl(
+    # Juntamos los tipos de aire y la meteorología en el control
+    overlayGroups = c(tipos_aire, "Meteorología"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  # Añadimos la leyenda dinámica basada en la paleta de aire
+  addLegend(
+    position = "bottomright",
+    pal = paleta_tipos,
+    values = estaciones_mapa$nom_tipo,
+    title = "Calidad del Aire",
+    opacity = 1
+  )
+
+# Mostrar el mapa
+mapa_tfm
+```
+

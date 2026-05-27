@@ -1,0 +1,191 @@
+
+
+
+```{r,message=FALSE, warning=FALSE}
+library(readxl)
+library(data.table)
+library(tidyverse)
+```
+
+# Proceso de limpieza de los datos de contaminación
+
+## Lectura de datos 
+
+```{r}
+ruta_contaminacion_2025<-"C:\\Users\\HP\\Desktop\\TFM\\Base_de_datos\\Datos_contaminacion\\Datos\\calidad_2025.csv"
+names(readRDS("estaciones_contami.rds"))
+```
+
+## Fase de Filtrado e Imputación 
+
+Proceso de limpieza de los datos de contaminación.
+
+1) Definimos los contaminantes de interés 
+2) Eliminamos columnas redundantes para Madrid ciudad
+3) Filtramos por las magnitudes seleccionadas
+4) CRITERIO DE VALIDACIÓN: Solo aceptamos código "V" 
+5) Sustitución de códigos por nombres (strings)
+6) Verificar dimensiones
+
+### Anotaciones hechas mientras se ha realizado el proceso de limpieza
+
+Como podemos comprobar hay una diferencia en las dimensiones. 8.000 datos no han sido validados. ¿Tenemos que imputar esos datos?
+
+**Soluciones**:
+1)  Utilizar suavizado B Splines: dejamos que el propio modelo o aproxime. Si te falta la medicion de las 3:00 a,, el spline utiliza la informacion de H02 y H04 para estimar la trayectoria suave de la curva. 
+2)  Imputar con la mediana: si el dato de las 3:00 no ha sido validado, se puede imputar con la mediana de dias previos. 
+3) Imputación espacial. coger el dato de una estación cercana y que sus curvas estén fuertemente relacionadas. 
+
+**NOTAS A TENER EN CUENTA**
+- Los datos horarios publicados se expresan en hora local de Madrid (UTC+2 o UTC+1 dependiendo de
+la época del año). Cuando se produce un cambio de hora, si ese día tiene una hora menos se calcula
+el dato diario con 23 valores. Cuando por el contrario se produce un cambio horario y el día tiene 25
+horas, se elimina el dato de la hora en la que se produce el retraso.
+
+- El valor H24 es el valor horario correspondiente a la última hora del día y se calcula como la media de
+los 6 valores diezminutales que van desde las 23 horas hasta las 24h, hablando siempre en horario
+local.
+
+- Los motivos por los que no se aporta dato de un contaminante en un momento determinado pueden
+ser muy diversos. Generalmente debido a labores de mantenimiento de los equipos, u otras
+incidencias que generan un dato anómalo, estos datos son revisados y anulados durante el proceso
+de validación. En algunos casos la falta de dato se produce debido a averías en el suministro eléctrico,
+en las comunicaciones, o en el propio equipo analizador, el dato no se llega a registrar.
+
+```{r}
+limpiar_aire_madrid <- function(dt) {
+  # 1. Definimos los contaminantes de interés y cargamos ubicaciones
+  mi_tabla_conta <- readRDS("estaciones_contami.rds") 
+  
+  cols_utiles <- mi_tabla_conta[, c("codigo_corto", "longitud", "latitud", "nom_tipo")]
+  
+  # Hacemos el merge
+  dt <- merge(cols_utiles, dt, by.x = "codigo_corto", by.y = "ESTACION") 
+  setDT(dt)
+  
+  # Renombramos para arreglar el "longitu" y devolver "ESTACION" a mayúsculas
+  setnames(dt, 
+           old = c("codigo_corto", "longitud", "latitud", "nom_tipo"), 
+           new = c("ESTACION", "LONGITUD", "LATITUD", "NOM_TIPO"))
+  
+  nombres_magnitudes <- c(
+    "1"  = "SO2",   "6"  = "CO", 
+    "7"  = "NO",    "8"  = "NO2", 
+    "9"  = "PM2.5", "10" = "PM10", 
+    "12" = "NOx",   "14" = "O3"
+  )
+  nombres_estaciones_aire <- c(
+    "4"  = "Pza. de España",           "40" = "Vallecas",
+    "8"  = "Escuelas Aguirre",         "47" = "Méndez Álvaro",
+    "11" = "Av. Ramón y Cajal",        "48" = "Pº Castellana",
+    "16" = "Arturo Soria",             "49" = "Retiro",
+    "17" = "Villaverde Alto",          "50" = "Plaza Castilla",
+    "18" = "Farolillo",                "54" = "Ensanche Vallecas",
+    "24" = "Casa de Campo",            "55" = "Urb. Embajada (Barajas)",
+    "27" = "Barajas",                  "56" = "Plaza Elíptica",
+    "35" = "Pza. del Carmen",          "57" = "Sanchinarro",
+    "36" = "Moratalaz",                "58" = "El Pardo",
+    "38" = "Cuatro Caminos",           "59" = "Parque Juan Carlos I",
+    "39" = "Barrio del Pilar",         "60" = "Tres Olivos"
+  )
+  
+  # 2. Eliminamos columnas redundantes para Madrid ciudad
+  cols_borrar <- intersect(names(dt), c("PROVINCIA", "MUNICIPIO", "PUNTO_MUESTREO"))
+  if(length(cols_borrar) > 0) dt[, (cols_borrar) := NULL]
+  
+  # 3. Filtramos por las magnitudes seleccionadas
+  dt <- dt[MAGNITUD %in% as.numeric(names(nombres_magnitudes)) & 
+           ESTACION %in% as.numeric(names(nombres_estaciones_aire))]
+  
+  # 4. CRITERIO DE VALIDACIÓN: Solo aceptamos código "V" [cite: 11, 17]
+  for (i in 1:24) {
+    h_col <- paste0("H", sprintf("%02d", i))
+    v_col <- paste0("V", sprintf("%02d", i))
+    
+    if(v_col %in% names(dt)) {
+      dt[get(v_col) != "V", (h_col) := NA]
+    }
+  }
+  
+  # 5. Sustitución de códigos por nombres (strings) 
+  dt[, MAGNITUD := nombres_magnitudes[as.character(MAGNITUD)]]
+  dt[, ESTACION := nombres_estaciones_aire[as.character(ESTACION)]] 
+  dt[, FECHA := as.Date(sprintf("%04d-%02d-%02d", ANO, MES, DIA))]
+  
+  # Borramos las columnas antiguas
+  cols_v <- names(dt)[grep("^V[0-9]{2}$", names(dt))] 
+  dt[, c("ANO", "MES", "DIA", cols_v) := NULL]
+  
+  
+  return(dt)
+}
+```
+
+
+
+
+
+```{r}
+# Paso 1: Lectura
+data_raw <- fread(ruta_contaminacion_2025, sep = ";")
+
+# Paso 2: Limpieza total con nuestra función
+datos_contaminacion_2025 <- limpiar_aire_madrid(data_raw)
+head(datos_contaminacion_2025) # Verificamos que se han limpiado correctamente los datos y los nombres de las columnas)
+# Paso 3: Verificar dimensiones
+matriz_estaciones <- table(datos_contaminacion_2025$ESTACION, datos_contaminacion_2025$MAGNITUD)
+matriz_estaciones
+dim(datos_contaminacion_2025) # Es correcto 
+view(datos_contaminacion_2025) # Verificamos que solo tenemos las estaciones de Madrid ciudad
+```
+Como podemos comprobar hay una diferencia en las dimensiones. 8.000 datos no han sido validados. ¿Tenemos que imputar esos datos?
+**Soluciones**:
+1)  Utilizar suavizado B Splines: dejamos que el propio modelo o aproxime. Si te falta la medicion de las 3:00 a,, el spline utiliza la informacion de H02 y H04 para estimar la trayectoria suave de la curva. 
+2)  Imputar con la mediana: si el dato de las 3:00 no ha sido validado, se puede imputar con la mediana de dias previos. 
+3) Imputación espacial. coger el dato de una estación cercana y que sus curvas estén fuertemente relacionadas. 
+
+**NOTAS A TENER EN CUENTA**
+- Los datos horarios publicados se expresan en hora local de Madrid (UTC+2 o UTC+1 dependiendo de
+la época del año). Cuando se produce un cambio de hora, si ese día tiene una hora menos se calcula
+el dato diario con 23 valores. Cuando por el contrario se produce un cambio horario y el día tiene 25
+horas, se elimina el dato de la hora en la que se produce el retraso.
+
+- El valor H24 es el valor horario correspondiente a la última hora del día y se calcula como la media de
+los 6 valores diezminutales que van desde las 23 horas hasta las 24h, hablando siempre en horario
+local.
+
+- Los motivos por los que no se aporta dato de un contaminante en un momento determinado pueden
+ser muy diversos. Generalmente debido a labores de mantenimiento de los equipos, u otras
+incidencias que generan un dato anómalo, estos datos son revisados y anulados durante el proceso
+de validación. En algunos casos la falta de dato se produce debido a averías en el suministro eléctrico,
+en las comunicaciones, o en el propio equipo analizador, el dato no se llega a registrar.
+
+
+```{r}
+# --- TABLA 1: MATRIZ DE PRESENCIA (La mejor para comparar y descartar) ---
+# Creamos una tabla donde las filas son las Estaciones, las columnas los Contaminantes, 
+# y nos pone un 1 si lo mide y un 0 si no lo mide.
+
+# Extraemos las combinaciones únicas que existen en tus datos
+inventario_unico <- unique(datos_contaminacion_2025[, .(NOM_TIPO, ESTACION, MAGNITUD)])
+
+# Transformamos a formato ancho (Pivot Table)
+tabla_matriz <- dcast(inventario_unico, 
+                      NOM_TIPO + ESTACION ~ MAGNITUD, 
+                      fun.aggregate = length)
+
+# Ordenamos alfabéticamente por tipo y estación
+setorder(tabla_matriz, NOM_TIPO, ESTACION)
+
+# La visualizamos
+View(tabla_matriz)
+
+
+# --- TABLA 2: LISTA ORDENADA (Por si prefieres el formato de lista vertical) ---
+# Ordena: 1º Tipo de Estación, 2º Contaminante, 3º Nombre de Estación
+tabla_lista <- copy(inventario_unico)
+setorder(tabla_lista, NOM_TIPO, MAGNITUD, ESTACION)
+
+View(tabla_lista)
+
+```
