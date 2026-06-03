@@ -16,7 +16,7 @@ data_raw_metereo <- fread(ruta_datos_metereo, sep = ";")
 
 # 3. Cargar estaciones meteorológicas
 # Nota: fread falla en Windows con espacios en la ruta, usamos read.csv
-ruta_est_metereo <- here("data", "raw", "Datos metereologicos", "Estaciones_2019", "estaciones_mete.csv")
+ruta_est_metereo <- here("data", "raw", "Datos metereologicos", "Estaciones_2019", "estaciones.csv")
 dt_ubicaciones_metereo <- as.data.table(read.csv(ruta_est_metereo, sep = ";", fileEncoding = "latin1"))
 
 # 4. Limpieza y reestructuración (Llamada a tu función modular)
@@ -37,7 +37,8 @@ datos_metereo_diarios <- datos_metereo_horarios[, lapply(.SD, function(x) {
   }
 }), by = .(ESTACION, LONGITUD, LATITUD, X_km, Y_km, FECHA), .SDcols = cols_clima]
 
-# 5. Creación del Índice Temporal (ID_TIEMPO)
+# 5. Filtrar estrictamente al año 2025 y crear Índice Temporal (ID_TIEMPO)
+datos_metereo_diarios <- datos_metereo_diarios[year(FECHA) == 2025]
 setorder(datos_metereo_diarios, FECHA)
 datos_metereo_diarios[, ID_TIEMPO := .GRP, by = FECHA]
 view(datos_metereo_diarios)
@@ -48,3 +49,4 @@ print(head(datos_metereo_diarios[, 1:6], 10))
 
 saveRDS(datos_metereo_diarios, here("data", "processed", "meteo_madrid_2025_diario.rds"))
 cat("\n💾 Guardado en data/processed/meteo_madrid_2025_diario.rds\n")
+

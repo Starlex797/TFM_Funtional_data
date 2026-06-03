@@ -16,7 +16,7 @@ limpiar_aire_madrid <- function(dt_bruto, dt_ubica) {
   setnames(dt, "CODIGO_CORTO", "ESTACION")
   
   # 2. LIMPIEZA DE COLUMNAS REDUNDANTES
-  cols_borrar <- intersect(names(dt), c("PROVINCIA", "MUNICIPIO", "PUNTO_MUESTREO"))
+  cols_borrar <- intersect(names(dt), c("PROVINCIA", "MUNICIPIO", "PUNTO_MUESTREO","Radicación Solar"))
   if(length(cols_borrar) > 0) dt[, (cols_borrar) := NULL]
   
   # 3. FILTRADO DE ESTACIONES Y CONTAMINANTES
@@ -147,6 +147,21 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
   set(dt, j = "ESTACION", value = unname(nombres_estaciones_clima[as.character(dt$ESTACION)]))
   set(dt, j = "FECHA",    value = as.Date(sprintf("%04d-%02d-%02d", dt$ANO, dt$MES, dt$DIA)))
   
+  # =========================================================================
+  # 5b. NUEVO: FILTRADO DE ESTACIONES Y ELIMINACIÓN DE RADIACIÓN SOLAR
+  # =========================================================================
+  estaciones_objetivo <- c(
+    "Plaza Elíptica", "Peñagrande", "Juan Carlos I", "J.M.D Villaverde", 
+    "J.M.D Moratalaz", "J.M.D Hortaleza", "Centro Mpal. De Acústica", "Casa de Campo"
+  )
+  
+  # Nos quedamos solo con las estaciones de la lista
+  dt <- dt[ESTACION %in% estaciones_objetivo]
+  
+  # Eliminamos la radiación solar (pasando a minúsculas por si lleva tilde en el diccionario)
+  dt <- dt[!tolower(MAGNITUD) %in% c("radiacion solar", "radiación solar")]
+  # =========================================================================
+  
   # 6. Borrado de columnas sobrantes
   cols_v <- names(dt)[grep("^V[0-9]{2}$", names(dt))]
   for (col in c("ANO", "MES", "DIA", cols_v)) set(dt, j = col, value = NULL)
@@ -255,5 +270,19 @@ limpiar_trafico_espacial_horario <- function(dt, dt_ubicaciones, mapa_poligonos)
   ), by = .(distrito, FECHA)]
   
   return(dt_areas_diario)
+}
+
+#----------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------
+library(stringi) # ¡NUEVA LIBRERÍA! Para quitar tildes fácilmente
+
+# Función auxiliar para limpiar textos (quita tildes, minúsculas, espacios extra)
+limpiar_nombres <- function(texto) {
+  texto <- tolower(trimws(texto))
+  texto <- stri_trans_general(texto, "Latin-ASCII") # Quita tildes
+  # Reemplaza múltiples espacios o guiones raros por un solo espacio
+  texto <- gsub("[[:punct:]]+", " ", texto) 
+  texto <- gsub("\\s+", " ", texto)
+  return(trimws(texto))
 }
 

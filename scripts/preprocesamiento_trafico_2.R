@@ -110,3 +110,4 @@ ggplot() +
   theme(legend.position  = "right",
         legend.key.size  = unit(0.4, "cm"),
         legend.text      = element_text(size = 7))
+

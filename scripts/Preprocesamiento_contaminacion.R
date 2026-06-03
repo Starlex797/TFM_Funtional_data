@@ -109,7 +109,7 @@ cat("Días válidos (Sin NA):            ", sum(!is.na(dt_no2_diario$LOG_NO2_DIA
 cat("Días imputables por INLA (NA):    ", sum(is.na(dt_no2_diario$LOG_NO2_DIARIO)), "\n\n")
 
 # Visualizar la estructura en la consola para confirmar el ID_TIEMPO
-print(head(dt_no2_diario[, .(ESTACION, FECHA, DATO_DIARIO, LOG_NO2_DIARIO, ID_TIEMPO)], 15))
+print(head(dt_no2_diario[, .(ESTACION, FECHA, DATO_DIARIO, LOG_NO2_DIARIO, ID_TIEMPO,LONGITUD,LATITUD)], 15))
 
 
 # 7. GUARDADO FINAL SEGURO DEL DATASET DIARIO MODELIZABLE
