@@ -8,14 +8,12 @@ library(data.table)
 library(here)
 
 # 1. Cargar datos de NO2 (variable respuesta)
-dt_no2 <- readRDS(here("data", "processed", "aire_madrid_2025_No2_trans_diarios.rds"))
-setDT(dt_no2)
-
-View(dt_no2)
-
+dt_no2_2025 <- readRDS(here("data", "processed", "aire_madrid_2025_No2_trans_diarios.rds"))
+setDT(dt_no2_2025)
+View(dt_no2_2025)
 # 2. Extraer y proyectar coordenadas espaciales
 # Se extraen las coordenadas únicas y se proyectan a UTM 30N (EPSG:25830) en kilómetros.
-coords_estaciones <- unique(dt_no2[, .(ESTACION, LONGITUD, LATITUD)])
+coords_estaciones <- unique(dt_no2_2025[, .(ESTACION, LONGITUD, LATITUD)])
 coords_sf <- st_as_sf(coords_estaciones, coords = c("LONGITUD", "LATITUD"), crs = 4326) # CRS original en WGS84 (grados)
 coords_utm <- st_transform(coords_sf, 25830) # Proyección a UTM zona 30N (metros)
 

@@ -1,52 +1,76 @@
 # ==============================================================================
-# CARGA, LIMPIEZA Y AGREGACIÓN DIARIA DE DATOS METEOROLÓGICOS
+# CARGA, LIMPIEZA Y AGREGACIÓN DE DATOS METEOROLÓGICOS — MULTI-ANUAL
+# Genera tres RDS independientes por año: horario, diario y mensual
 # ==============================================================================
 
 library(tidyverse)
 library(data.table)
 library(here)
 
-# 1. Cargar diccionarios y funciones
 source(here("R", "dictionaries.R"))
 source(here("R", "cleaning_functions.R"))
 
-# 2. Rutas y lectura del archivo bruto
-ruta_datos_metereo <- here("data", "raw", "Datos metereologicos", "2025", "2025_datos_metereo.csv")
-data_raw_metereo <- fread(ruta_datos_metereo, sep = ";")
+# ==============================================================================
+# PARÁMETRO: AÑOS A PROCESAR
+# Añade o elimina años según los datos disponibles en data/raw/Datos metereologicos/
+# ==============================================================================
+anios_procesar <- c(2022, 2025)
 
-# 3. Cargar estaciones meteorológicas
-# Nota: fread falla en Windows con espacios en la ruta, usamos read.csv
-ruta_est_metereo <- here("data", "raw", "Datos metereologicos", "Estaciones_2019", "estaciones.csv")
-dt_ubicaciones_metereo <- as.data.table(read.csv(ruta_est_metereo, sep = ";", fileEncoding = "latin1"))
 
-# 4. Limpieza y reestructuración (Llamada a tu función modular)
-cat("⏳ Limpiando datos meteorológicos...\n")
-datos_metereo_horarios <- limpiar_datos_metereo(data_raw_metereo, dt_ubicaciones_metereo)
-head(datos_metereo_horarios)
-# 4. Agregación diaria múltiple (Controlando NAs)
-cat("⏳ Agregando a escala diaria (Umbral 20% NA)...\n")
 
-# Extraemos qué columnas pertenecen al clima
-cols_clima <- setdiff(names(datos_metereo_horarios), c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km", "FECHA", "HORA"))
+# ==============================================================================
+# BUCLE PRINCIPAL: procesar y guardar cada año por separado
+# ==============================================================================
+carpeta_base_meteo <- here("data", "raw", "Datos metereologicos")
+ruta_estaciones    <- here("data", "raw", "Datos metereologicos",
+                           "Estaciones_2019", "estaciones.csv")
 
-datos_metereo_diarios <- datos_metereo_horarios[, lapply(.SD, function(x) {
-  if (sum(is.na(x)) / .N >= 0.2) {
-    NA_real_
-  } else {
-    mean(x, na.rm = TRUE)
-  }
-}), by = .(ESTACION, LONGITUD, LATITUD, X_km, Y_km, FECHA), .SDcols = cols_clima]
+anios_ok <- character(0)
 
-# 5. Filtrar estrictamente al año 2025 y crear Índice Temporal (ID_TIEMPO)
-datos_metereo_diarios <- datos_metereo_diarios[year(FECHA) == 2025]
-setorder(datos_metereo_diarios, FECHA)
-datos_metereo_diarios[, ID_TIEMPO := .GRP, by = FECHA]
-view(datos_metereo_diarios)
-# 6. Verificación y Guardado
-cat("\n✅ Procesamiento completado. Resumen diario:\n")
-cat("Filas totales (Estaciones × Días):", nrow(datos_metereo_diarios), "\n\n")
-print(head(datos_metereo_diarios[, 1:6], 10))
+for (anio in anios_procesar) {
+  
+  resultado <- tryCatch(
+    procesar_anio_meteo(anio, carpeta_base_meteo, ruta_estaciones),
+    error = function(e) {
+      warning("❌ Error procesando el año ", anio, ": ", conditionMessage(e))
+      NULL
+    }
+  )
+  
+  if (is.null(resultado)) next
+  
+  # Guardar los tres niveles de resolución para este año
+  cat("\n💾 Guardando archivos del año", anio, "...\n")
+  
+  ruta_h <- here("data", "processed","Clima","horario", paste0("meteo_madrid_", anio, "_horario.rds"))
+  ruta_d <- here("data", "processed","Clima","diario" , paste0("meteo_madrid_", anio, "_diario.rds"))
+  ruta_m <- here("data", "processed", "Clima","mensual", paste0("meteo_madrid_", anio, "_mensual.rds"))
+  
+  saveRDS(resultado$horario,  ruta_h)
+  saveRDS(resultado$diario,   ruta_d)
+  saveRDS(resultado$mensual,  ruta_m)
+  
+  cat("   Horario  →", basename(ruta_h), "\n")
+  cat("   Diario   →", basename(ruta_d), "\n")
+  cat("   Mensual  →", basename(ruta_m), "\n")
+  
+  anios_ok <- c(anios_ok, as.character(anio))
+}
 
-saveRDS(datos_metereo_diarios, here("data", "processed", "meteo_madrid_2025_diario.rds"))
-cat("\n💾 Guardado en data/processed/meteo_madrid_2025_diario.rds\n")
+# ==============================================================================
+# RESUMEN FINAL
+# ==============================================================================
+cat("\n", strrep("=", 60), "\n")
+if (length(anios_ok) == 0) {
+  stop("No se pudo procesar ningún año correctamente.")
+} else {
+  cat("✅ Procesamiento completado.\n")
+  cat("   Años guardados:", paste(anios_ok, collapse = ", "), "\n")
+  cat("   Archivos generados por año: horario / diario / mensual\n")
+  cat(strrep("=", 60), "\n")
+}
 
+# Chequear los datos 
+
+horario_2025<-readRDS(here("data", "processed","Clima","horario","meteo_madrid_2022_horario.rds"))
+view(horario_2025)

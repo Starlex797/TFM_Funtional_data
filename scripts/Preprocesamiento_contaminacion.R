@@ -1,40 +1,70 @@
-# scripts/01_load_clean_data.R
-# Objetivo: Cargar los datos crudos de contaminación, limpiarlos y guardarlos por año.
-
+#------------------------------------------------------------------------
+# Goal: load the raw data of air pollution, clean it, and save it by year.
+#------------------------------------------------------------------------
 library(here)
 library(data.table)
 library(lubridate)
 
-# 2. Cargar herramientas --------------------------------------------------
+# 1). Charge the dictionaries and cleaning functions
 source(here("R", "dictionaries.R"))
 source(here("R", "cleaning_functions.R"))
 
-# 3. Cargar ubicaciones espaciales ----------------------------------------
+# 2).Charge spatial locations  
 dt_ubicaciones_aire <- fread(here("data", "raw", "Datos_contaminacion", "Estaciones", "datos.csv"))
 setDT(dt_ubicaciones_aire)
 
-# 4. Bucle de procesamiento y limpieza ------------------------------------
-anios_analisis <- c(2019, 2023, 2025)
+# 3). LOOP in order to clean the data of the years of interest.
+# Strategy: for each year we first look for a single annual CSV (e.g. calidad_2025.csv).
+# If it does not exist we look for a monthly subfolder (e.g. Anio19/) and combine the
+# files with combinar_meses_anual() before cleaning.
+anios_analisis <- c(2019, 2023, 2024, 2025)
 lista_historico_aire <- list()
+
+# Base folder that contains both the annual CSVs and the monthly subfolders
+carpeta_datos <- here("data", "raw", "Datos_contaminacion", "Datos")
 
 for (anio in anios_analisis) {
   
-  # Construimos la ruta de forma segura y limpia delegando en 'here'
-  ruta_archivo <- here("data", "raw", "Datos_contaminacion", "Datos", paste0("calidad_", anio, ".csv"))
+  cat("\n── Año", anio, "──────────────────────────────────────────\n")
   
-  if(file.exists(ruta_archivo)){
-    cat("✅ Procesando contaminación del año:", anio, "\n")
+  # --- Option A: single annual CSV ------------------------------------------
+  ruta_csv_anual <- file.path(carpeta_datos, paste0("calidad_", anio, ".csv"))
+  
+  # --- Option B: monthly subfolder (e.g. Anio19, Anio23, Anio24) ------------
+  sufijo_anio    <- substr(as.character(anio), 3, 4)   # "19", "23", "24", "25"
+  ruta_carpeta   <- file.path(carpeta_datos, paste0("Anio", sufijo_anio))
+  
+  dt_temporal <- tryCatch({
     
-    # Leemos y limpiamos
-    dt_temporal <- fread(ruta_archivo, sep = ";")
-    dt_limpio   <- limpiar_aire_madrid(dt_temporal, dt_ubicaciones_aire)
+    if (file.exists(ruta_csv_anual)) {
+      cat("  Fuente: archivo anual único ->", basename(ruta_csv_anual), "\n")
+      fread(ruta_csv_anual, sep = ";")
+      
+    } else if (dir.exists(ruta_carpeta)) {
+      cat("  Fuente: carpeta mensual     ->", basename(ruta_carpeta), "\n")
+      combinar_meses_anual(ruta_carpeta)
+      
+    } else {
+      cat("  ❌ No se encontró ni archivo anual ni carpeta mensual para", anio, "\n")
+      cat("     Buscado en:\n")
+      cat("       -", ruta_csv_anual, "\n")
+      cat("       -", ruta_carpeta,   "\n")
+      NULL
+    }
     
-    # Guardamos en la lista indexando por el año
-    lista_historico_aire[[as.character(anio)]] <- dt_limpio
-  } else {
-    cat("❌ Archivo no encontrado para el año:", anio, "\n")
-    cat("   Ruta buscada:", ruta_archivo, "\n\n")
-  }
+  }, error = function(e) {
+    cat("  ❌ Error al leer los datos:", conditionMessage(e), "\n")
+    NULL
+  })
+  
+  # Skip cleaning if loading failed
+  if (is.null(dt_temporal)) next
+  
+  # Clean and store
+  dt_limpio <- limpiar_aire_madrid(dt_temporal, dt_ubicaciones_aire)
+  lista_historico_aire[[as.character(anio)]] <- dt_limpio
+  cat("  ✅ Limpieza completada:", nrow(dt_limpio), "filas |",
+      uniqueN(dt_limpio$ESTACION), "estaciones\n")
 }
 
 # 5. Guardado seguro en disco ---------------------------------------------
@@ -53,68 +83,86 @@ if (length(lista_historico_aire) > 0) {
 
 
 # ==============================================================================
-# FILTRO DE DATOS A NO2, AGREGACIÓN DIARIA Y LOG-TRANSFORMACIÓN
+# NO2: FILTRO HORARIO, AGREGACIÓN DIARIA Y LOG-TRANSFORMACIÓN (todos los años)
 # ==============================================================================
+# We work directly from lista_historico_aire so this block runs immediately
+# after the loading loop without needing to re-read any file from disk.
 
-# 1. Cargar el año de análisis limpio (Formato Largo)
-aire_madrid_2025_limpio <- readRDS(here("data", "processed", "aire_madrid_2025_limpio.rds"))
-setDT(aire_madrid_2025_limpio)
+for (anio in names(lista_historico_aire)) {
+  
+  cat("\n── NO2 procesando año", anio, "─────────────────────────────\n")
+  
+  dt_aire <- lista_historico_aire[[anio]]
+  
+  # 1. Filter to NO2 ----------------------------------------------------------
+  dt_no2 <- dt_aire[MAGNITUD == "NO2"]
+  cat("  Registros horarios de NO2:", nrow(dt_no2), "\n")
+  
+  if (nrow(dt_no2) == 0) {
+    cat("  ⚠️  Sin datos de NO2 para", anio, "— se omite.\n")
+    next
+  }
+  dt_no2[!is.na(DATO), LOG_NO2_HORARIO := log(DATO + 1)]
+  
+  # Save the raw hourly NO2 dataset
+  saveRDS(dt_no2, here("data", "processed","contaminacion","horario",paste0("aire_madrid_", anio, "_No2_horarios.rds")))
+  
+  # 2. Hourly -> daily (daily mean; days with > 20 % NAs become NA) -----------
+  dt_no2_diario <- agregar_a_diario(
+    dt_no2,
+    col_grupo    = "ESTACION",
+    col_fecha    = "FECHA",
+    col_valor    = "DATO",
+    col_longitud = "LONGITUD",
+    col_latitud  = "LATITUD",
+    umbral_na    = 0.2
+  )
+  
+  # 3. Log transformation: log(x + 1) to approximate normality for INLA ------
+  dt_no2_diario[!is.na(DATO_DIARIO), LOG_NO2_DIARIO := log(DATO_DIARIO + 1)]
+  
+  # 4. Sequential time index (ID_TIEMPO) for the AR1 component in INLA -------
+  setorder(dt_no2_diario, FECHA)
+  dt_no2_diario[, ID_TIEMPO := .GRP, by = FECHA]
+  
+  # 5. Quality-control summary ------------------------------------------------
+  cat("  📊 Resumen del dataset diario:\n")
+  cat("     Estaciones × Días  :", nrow(dt_no2_diario), "\n")
+  cat("     Días válidos        :", sum(!is.na(dt_no2_diario$LOG_NO2_DIARIO)), "\n")
+  cat("     Días con NA (INLA)  :", sum( is.na(dt_no2_diario$LOG_NO2_DIARIO)), "\n")
+  print(head(dt_no2_diario[, .(ESTACION, FECHA, DATO_DIARIO, LOG_NO2_DIARIO,
+                               ID_TIEMPO, LONGITUD, LATITUD)], 5))
+  
+  # 6. Save final daily dataset -----------------------------------------------
+  saveRDS(
+    dt_no2_diario,
+    here("data", "processed","contaminacion","diario", paste0("aire_madrid_", anio, "_No2_trans_diarios.rds"))
+  )
+  cat("  💾 Guardado: aire_madrid_", anio, "_log_No2_trans_diarios.rds\n", sep = "")
+  
+  # 7. Hourly -> monthly (daily mean per station-month; months with > 20 % NAs -> NA)
+  # Usamos la función genérica convertir_resolucion() de cleaning_functions.R
+  # que acepta columnas de grupo y valor libremente.
+  dt_no2_mensual <- convertir_resolucion(
+    dt          = dt_no2,
+    a           = "mensual",
+    col_fecha   = "FECHA",
+    cols_grupo  = c("ESTACION", "LONGITUD", "LATITUD", "NOM_TIPO"),
+    cols_valores = "DATO",
+    umbral_na   = 0.2
+  )
+  
+  # Opcional: log-transformación mensual consistente con la diaria
+  dt_no2_mensual[!is.na(DATO), LOG_NO2_MENSUAL := log(DATO + 1)]
+  setnames(dt_no2_mensual, "DATO", "DATO_MENSUAL")
+  
+  saveRDS(
+    dt_no2_mensual,
+    here("data", "processed","contaminacion","mensual", paste0("aire_madrid_", anio, "_log_No2_mensuales.rds"))
+  )
+  cat("  💾 Guardado: aire_madrid_", anio, "_log_No2_mensuales.rds\n", sep = "")
+}
 
-# 2. Filtrar estrictamente por la magnitud de interés (NO2)
-dt_no2 <- aire_madrid_2025_limpio[MAGNITUD == "NO2"]
-head(dt_no2)
-cat("📊 Registros horarios brutos de NO2 para 2025: ", nrow(dt_no2), "\n")
-
-# [CORREGIDO] Guardado del dataset horario filtrado de NO2 antes de promediar
-saveRDS(dt_no2, here("data", "processed", "aire_madrid_2025_No2_horarios.rds"))
-
-
-# 3. PASAR DE DATOS HORARIOS A DIARIOS CON CONTROL DE NAs
-# Calculamos la media aritmética de la concentración real (valor_NO2)
-# Si el día tiene más del 20% de NAs (umbral_na = 0.2), el día se descarta como NA
-dt_no2_diario <- agregar_a_diario(dt_no2, 
-                                  col_grupo = "ESTACION", 
-                                  col_fecha = "FECHA", 
-                                  col_valor = "DATO", 
-                                  col_longitud ="LONGITUD", 
-                                  col_latitud = "LATITUD",
-                                  umbral_na = 0.2)
-
-View(dt_no2_diario)
-
-
-# 4. APLICAR TRANSFORMACIÓN LOGARÍTMICA AL PROMEDIO DIARIO
-# Ahora aplicamos log(x + 1) sobre el valor diario para aproximar la normalidad en INLA
-# R de forma nativa mantendrá los NA intactos si DATO_DIARIO es NA.
-
-
-dt_no2_diario[!is.na(DATO_DIARIO), LOG_NO2_DIARIO := log(DATO_DIARIO + 1)]
-
-
-# 5. CREACIÓN DEL ÍNDICE TEMPORAL SECUENCIAL (ID_TIEMPO)
-# Con el objetivo que INLA pueda procesar el tiempo en el caso que se quiera poner un 
-#Autoregresivo. En caso de que no se ponga un autoregresivo, solo estaríamos ante una predicción 
-#espacia. Con el autoregresivo es espacio-temporal y el ID_TIEMPO es necesario para que INLA sepa el orden temporal de los datos.
-# Ordenamos cronológicamente por fecha (indispensable para el AR1)
-setorder(dt_no2_diario, FECHA)
-
-# Asignamos el índice entero continuo (1, 2, 3... T) tal como hace Wong en prep.R
-dt_no2_diario[, ID_TIEMPO := .GRP, by = FECHA]
-
-
-# 6. VERIFICACIONES DE CONTROL DE CALIDAD Y NAs
-cat("📊 Resumen del Dataset Diario generado para INLA:\n")
-cat("Total filas (Estaciones × Días): ", nrow(dt_no2_diario), "\n")
-cat("Días válidos (Sin NA):            ", sum(!is.na(dt_no2_diario$LOG_NO2_DIARIO)), "\n")
-cat("Días imputables por INLA (NA):    ", sum(is.na(dt_no2_diario$LOG_NO2_DIARIO)), "\n\n")
-
-# Visualizar la estructura en la consola para confirmar el ID_TIEMPO
-print(head(dt_no2_diario[, .(ESTACION, FECHA, DATO_DIARIO, LOG_NO2_DIARIO, ID_TIEMPO,LONGITUD,LATITUD)], 15))
-
-
-# 7. GUARDADO FINAL SEGURO DEL DATASET DIARIO MODELIZABLE
-# [CORREGIDO] Guardamos el objeto 'dt_no2_diario' con nombre explícito del año
-saveRDS(dt_no2_diario, here("data", "processed", "aire_madrid_2025_No2_trans_diarios.rds"))
-cat("💾 Dataset diario de NO2 guardado con éxito en data/processed/\n")
+cat("\n✅ Pipeline NO2 completado para todos los años (horario, diario y mensual).\n")
 
 
