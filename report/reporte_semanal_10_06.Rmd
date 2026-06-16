@@ -1,0 +1,218 @@
+# Explicación del modelo que estamos utilizando  
+
+## Modelo INLA-SPDE 
+
+
+# Análisis exploratorio (EDA)
+
+# Ubicaciones de las estaciones de contaminación, tráfico y climatológicos 
+
+```{r}
+library(here)
+knitr::include_graphics(here("output","figures","mapa_medidores_trafico_tipologia.png"))
+knitr::include_graphics(here("results","figures","mapa_01_solo_aire.png"))
+knitr::include_graphics(here("results","figures","mapa_02_solo_clima.png"))
+knitr::include_graphics(here("results","figures","mapa_04_variables_climatologicas.png"))
+knitr::include_graphics(here("results","figures","mapa_estaciones_madrid_2025.png"))
+
+```
+
+## Análisis exploratorio de la variable de estudio: N02 
+
+### Histograma
+
+El modelo INLA-SPDE asume que la variable respuesta y los errores  se distribuye 
+de manera normal. Debido a esto, analizamos si la variable que se desea predecir 
+se distribuye como una normal o no. 
+
+```{r,echo=FALSE,fig.align='center',out.width=80%,fig.cap="Histograma de NO2"}
+library(here)
+knitr::include_graphics(here("output","figures","01_no2_histogramas.png"))
+```
+
+Como se puede comprobar existe una asimetría hacía la derecha, no se distribuye de manera normal. Por este motivo, se relaiza una transformación "log neperiano" para aproximarlo a una normal. No se distriubye cono una normal pero casi. 
+
+### BOX-plot 
+
+### NO2 POR ESTACIONES. Teniendo en cuenta a nivel horario, a nivel diario y mensual 
+
+
+## Análisis de las variables climatológicas
+
+El objetivo de este análisis es determinar si las variables meteorológicas presentan **homogeneidad espacial** dentro del área de Madrid. Esta pregunta es crítica para el modelo INLA-SPDE: si una variable se comporta de forma similar en todas las estaciones, podemos usar directamente la media de la ciudad como covariable en el modelo sin necesidad de interpolación espacial. Si por el contrario existe heterogeneidad, habría que interpolar el valor de esa variable en las ubicaciones de las estaciones de NO₂.
+
+Las variables disponibles y el número de estaciones que las miden son:
+
+| Variable | Estaciones |
+|---|:---:|
+| Temperatura (°C) | 25 |
+| Humedad Relativa (%) | 23 |
+| Velocidad Viento (km/h) | 10 |
+| Dirección Viento (°) | 10 |
+| Precipitaciones (mm) | 10 |
+| Presión Barométrica (hPa) | 8 |
+
+### Evolución Mensual de Variables Climatológicas por Estación
+
+Los gráficos de líneas muestran la media mensual de cada variable para cada estación de medida a lo largo de 2025. Cada línea representa una estación. Si las líneas son muy paralelas y se agrupan en una banda estrecha, la variable es espacialmente homogénea (todas las estaciones se comportan igual). Si las líneas se separan o se cruzan, hay heterogeneidad espacial.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Temperatura - Evolución mensual por estación"}
+knitr::include_graphics(here("outputs","correlacion_espacial","00b_Lineas_Mensuales_TemperaturaC.png"))
+```
+
+Las 25 estaciones muestran una evolución mensual prácticamente idéntica, siguiendo el ciclo estacional esperado con mínimos en enero-febrero (~8°C) y máximos en julio-agosto (~28°C). La separación entre líneas es pequeña y constante a lo largo del año. Esto sugiere que la Temperatura es espacialmente muy homogénea en Madrid.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Humedad Relativa - Evolución mensual por estación"}
+knitr::include_graphics(here("outputs","correlacion_espacial","00b_Lineas_Mensuales_HumedadRelativa.png"))
+```
+
+Las 23 estaciones presentan también un patrón estacional coherente, con mayor humedad en invierno y primavera y mínimos en verano. La banda de líneas es algo más ancha que en temperatura, especialmente en mayo-junio, pero el patrón temporal es compartido. La homogeneidad es alta.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Velocidad Viento - Evolución mensual por estación"}
+knitr::include_graphics(here("outputs","correlacion_espacial","00b_Lineas_Mensuales_VelocidadVientokmh.png"))
+```
+
+Con solo 10 estaciones medidoras, la Velocidad del Viento ya muestra mayor dispersión entre estaciones. Algunas estaciones presentan valores sistemáticamente más altos (zonas más expuestas) mientras otras son más resguardadas. El patrón temporal es similar pero la variabilidad entre estaciones es notable.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Dirección Viento - Evolución mensual por estación"}
+knitr::include_graphics(here("outputs","correlacion_espacial","00b_Lineas_Mensuales_DireccinViento.png"))
+```
+
+La Dirección del Viento es la variable más heterogénea: las líneas se separan y cruzan a lo largo del año, sin un patrón único compartido por todas las estaciones. La dirección predominante varía según la ubicación de cada estación dentro del relieve urbano, lo que apunta a una heterogeneidad espacial real.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Precipitaciones - Evolución mensual por estación"}
+knitr::include_graphics(here("outputs","correlacion_espacial","00b_Lineas_Mensuales_Precipitacionesmm.png"))
+```
+
+Las Precipitaciones muestran un comportamiento errático y muy variable entre estaciones, especialmente en los meses de otoño e invierno donde la lluvia es más convectiva y localizada. Los valores en verano convergen hacia cero en todas las estaciones, pero en el resto del año la dispersión es considerable. Esta variable requiere tratamiento espacial específico.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Presión Barométrica - Evolución mensual por estación"}
+knitr::include_graphics(here("outputs","correlacion_espacial","00b_Lineas_Mensuales_PresinBaromtricahPa.png"))
+```
+
+Las 8 estaciones que miden Presión Barométrica muestran líneas prácticamente superpuestas, con variaciones mensuales absolutamente coherentes entre sí. Esto refleja el comportamiento físico de la presión atmosférica, que es altamente homogénea a escala urbana. Las pequeñas diferencias absolutas de nivel se deben a diferencias de altitud entre estaciones, no a heterogeneidad dinámica.
+
+### Coeficiente de Variación entre Estaciones por Mes
+
+El Coeficiente de Variación (CV = desviación típica / |media| × 100) mide, para cada mes, cuánto varían los valores entre estaciones en términos relativos. Un CV bajo indica que todas las estaciones dan valores similares ese mes (campo homogéneo), mientras que un CV alto revela que hay diferencias importantes entre ubicaciones.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="CV entre estaciones - Análisis mensual de todas las variables"}
+knitr::include_graphics(here("outputs","correlacion_espacial","00c_CV_Estaciones_Mes.png"))
+```
+
+Los resultados confirman el diagnóstico visual de los gráficos de líneas:
+
+- **Temperatura y Presión Barométrica**: CV muy bajo y estable (<20%), máxima homogeneidad.
+- **Humedad Relativa**: CV moderado, con picos en los meses de transición (mayo-junio), pero en general contenido.
+- **Velocidad del Viento**: CV elevado y consistente (~35-43%), refleja diferencias estructurales entre estaciones.
+- **Precipitaciones**: CV extremadamente alto en verano (hasta >100%), porque cuando la media es casi cero cualquier pequeña diferencia absoluta dispara el ratio. En el resto del año el CV también es alto.
+- **Dirección del Viento**: CV moderado-alto; la dirección media puede estar cerca del norte o sur pero la dispersión entre estaciones es notable.
+
+## Análisis de Homogeneidad Espacial: Correlaciones Temporales entre Estaciones
+
+### Metodología: ¿Por qué correlación temporal y no el Índice de Moran ni el variograma?
+
+Para responder a la pregunta *"¿es necesaria la interpolación espacial?"* existen varios enfoques estadísticos. En este análisis se optó por la **correlación temporal de Pearson entre pares de estaciones** en lugar del Índice de Moran o el variograma. A continuación se justifica esta decisión.
+
+**Índice de Moran**
+
+El Índice de Moran mide si los valores de una variable en un corte transversal puntual (por ejemplo, las medias anuales de cada estación) muestran agrupamiento espacial. Tiene dos limitaciones críticas en nuestro contexto:
+
+1. **Muestra insuficiente**: Con 8-25 estaciones, el contraste de Moran tiene muy baja potencia estadística. En nuestros resultados, todos los tests Monte Carlo (999 permutaciones) dieron **no significativos** para todas las variables, incluso para Temperatura donde la homogeneidad es visualmente evidente. Esto se debe a que con tan pocas observaciones espaciales, el test no tiene potencia para distinguir una señal real del ruido aleatorio.
+
+2. **Pregunta equivocada**: El Índice de Moran responde a *"¿están agrupados espacialmente los valores medios anuales?"*. Nosotros necesitamos saber *"¿siguen todas las estaciones el mismo patrón temporal?"*. Son preguntas distintas: una variable puede no mostrar agrupamiento espacial significativo en sus medias anuales pero aun así tener patrones temporales prácticamente idénticos en todas las estaciones, que es lo que nos permite usar la media de la ciudad como covariable del modelo.
+
+**Variograma**
+
+El variograma experimental modela cómo crece la disimilitud entre pares de puntos en función de la distancia. Tampoco es el enfoque adecuado aquí por los siguientes motivos:
+
+1. **Requiere muchos puntos**: El variograma es fiable cuando hay decenas o centenares de puntos bien distribuidos en el espacio. Con 8-25 estaciones en un dominio de ~20×20 km, los bins de distancia tienen muy pocos pares, lo que hace que el variograma sea inestable y los ajustes de modelos teóricos poco robustos.
+
+2. **Solo usa medias agregadas**: El variograma se calcula sobre los valores anuales medios de cada estación, ignorando las 8.760 horas de información temporal disponible. Esto supone desaprovechar la mayor parte de la información.
+
+3. **Coordenadas problemáticas**: Varias estaciones meteorológicas presentan coordenadas con errores de codificación en los datos brutos (LONGITUD ~ -0.37 en lugar de ~ -3.7). Aunque esto no afecta al análisis temporal, sí contaminaría los cálculos de distancia del variograma.
+
+**Correlación temporal de Pearson (enfoque adoptado)**
+
+La correlación temporal entre estaciones responde directamente a la pregunta de interés: *¿se comportan igual todas las estaciones a lo largo del tiempo?* Sus ventajas son:
+
+- Usa la serie horaria completa (8.760 observaciones por año), maximizando la información disponible.
+- Es robusta al número reducido de estaciones: no necesita muchos puntos espaciales, solo pares de series temporales.
+- Responde exactamente a la pregunta del modelo: si r ≈ 1, la covariable puede reemplazarse por la media de la ciudad; si r es baja, las diferencias espaciales son reales y persistentes.
+- Permite comparar años (2022 vs 2025) para verificar que la homogeneidad es estable y no un artefacto del año concreto analizado.
+
+### Resumen de Homogeneidad Espacial (2025)
+
+El siguiente gráfico resume la correlación mediana entre pares de estaciones para cada variable, con las barras de error mostrando el rango completo [mín, máx] entre todos los pares.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Homogeneidad espacial - Correlación mediana entre estaciones por variable"}
+knitr::include_graphics(here("outputs","correlacion_espacial","05_Homogeneidad_Espacial_Resumen.png"))
+```
+
+El gráfico agrupa las variables en tres categorías: **Media ciudad** (verde, r ≥ 0.90), **zona gris** (naranja, 0.70 ≤ r < 0.90) e **Interpolar IDW** (rojo, r < 0.70). Temperatura, Presión Barométrica y Humedad Relativa se sitúan claramente en la zona homogénea, mientras que Velocidad del Viento queda en zona gris y Dirección del Viento y Precipitaciones requieren interpolación espacial.
+
+### Tabla Comparativa de Correlaciones (2022 vs 2025)
+
+La tabla siguiente muestra que los resultados son consistentes entre años, lo que descarta que la homogeneidad observada sea un artefacto del año 2025.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library(knitr)
+library(here)
+
+tabla_homo <- read.csv(here("outputs","correlacion_espacial","05_Homogeneidad_Espacial_Comparativa.csv"))
+
+kable(tabla_homo, 
+      caption = "Correlación temporal mediana entre estaciones (Pearson): Comparación 2022 vs 2025",
+      col.names = c("Variable", "r 2022", "r 2025", "n 2022", "n 2025", "Decisión"),
+      digits = 3,
+      align = c("l", "c", "c", "c", "c", "l"))
+```
+
+Las diferencias entre años (columnas r 2022 y r 2025) son pequeñas en todos los casos, lo que indica que la estructura de homogeneidad espacial es estable interanualmente. Las conclusiones para el modelo son:
+
+| Rango de r | Decisión | Variables |
+|:---|:---|:---|
+| r ≥ 0.90 | **Media ciudad** | Temperatura, Presión Barométrica, Humedad Relativa |
+| 0.70 ≤ r < 0.90 | **Media o interpolar** | Velocidad del Viento |
+| r < 0.70 | **Interpolar (IDW)** | Dirección del Viento, Precipitaciones |
+
+### Heatmaps de Correlación entre Estaciones
+
+Los heatmaps muestran la matriz completa de correlaciones de Pearson entre todos los pares de estaciones para cada variable. Las estaciones están reordenadas por clustering jerárquico para que las más similares aparezcan juntas. La diagonal siempre vale 1 (correlación de cada estación consigo misma). Los valores en cada celda permiten identificar qué estaciones son atípicas o divergentes del comportamiento mayoritario.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Temperatura - Todas las correlaciones r > 0.94; campo muy homogéneo"}
+knitr::include_graphics(here("outputs","correlacion_espacial","05_Heatmap_Cor_Temperatura.png"))
+```
+
+El heatmap de Temperatura muestra que prácticamente todos los pares tienen r > 0.94, con la mayoría por encima de 0.98. No hay ninguna estación claramente divergente. El campo térmico de Madrid puede representarse con la media de cualquier subconjunto de estaciones.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Humedad Relativa - Alta homogeneidad general con algunas estaciones en zona gris"}
+knitr::include_graphics(here("outputs","correlacion_espacial","05_Heatmap_Cor_HumedadRelativa.png"))
+```
+
+La Humedad Relativa es muy homogénea (r mediana = 0.975), aunque los valores mínimos (~0.84) indican que alguna estación tiene ligeras particularidades. En cualquier caso, la media de la ciudad es una representación adecuada.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Velocidad Viento - Heterogeneidad moderada, zona gris (r mediana = 0.787)"}
+knitr::include_graphics(here("outputs","correlacion_espacial","05_Heatmap_Cor_VelocidadViento.png"))
+```
+
+La Velocidad del Viento muestra correlaciones más dispersas (rango 0.62–0.89). Algunas estaciones se agrupan bien entre sí pero otras presentan correlaciones moderadas con el resto, probablemente debido a efectos locales del terreno urbano (edificios, zonas abiertas). Se recomienda valorar interpolación espacial para esta variable.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Dirección Viento - Heterogeneidad significativa, requiere interpolación (r mediana = 0.505)"}
+knitr::include_graphics(here("outputs","correlacion_espacial","05_Heatmap_Cor_DirViento.png"))
+```
+
+La Dirección del Viento tiene la mayor heterogeneidad de todas las variables estudiadas. Las correlaciones varían entre 0.18 y 0.81, con una mediana de solo 0.505. La dirección del viento es la variable más influida por la orografía y el entorno urbano local, lo que explica que estaciones cercanas puedan tener comportamientos muy distintos.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Precipitaciones - Heterogeneidad significativa, requiere interpolación (r mediana = 0.619)"}
+knitr::include_graphics(here("outputs","correlacion_espacial","05_Heatmap_Cor_Precipitaciones.png"))
+```
+
+Las Precipitaciones muestran correlaciones en el rango 0.41–0.85. Los eventos de lluvia convectiva son localizados por naturaleza, lo que genera diferencias reales entre estaciones que no desaparecen al agregar mensualmente. Es necesaria interpolación espacial para esta variable.
+
+```{r,echo=FALSE,fig.align='center',out.width=100%,fig.cap="Presión Barométrica - Máxima homogeneidad posible, r mediana = 0.990"}
+knitr::include_graphics(here("outputs","correlacion_espacial","05_Heatmap_Cor_PresionBaromtrica.png"))
+```
+
+La Presión Barométrica muestra correlaciones extremadamente altas entre todas las estaciones (rango 0.98–1.00). Esto es esperable desde el punto de vista físico: la presión atmosférica es prácticamente uniforme a escala de una ciudad. La media de cualquier estación es una representación perfecta del campo de presión en Madrid.
+

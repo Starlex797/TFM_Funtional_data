@@ -74,3 +74,4 @@ if (length(anios_ok) == 0) {
 
 horario_2025<-readRDS(here("data", "processed","Clima","horario","meteo_madrid_2022_horario.rds"))
 view(horario_2025)
+

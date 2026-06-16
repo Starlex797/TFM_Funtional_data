@@ -68,34 +68,6 @@ hist(dt_objetivo$LOG_NIVEL,
 dev.off() # Cerramos el dispositivo para escribir el archivo en el disco
 
 
-# --- 4.2 BOXPLOTS ---
-png(here("output", "figures", "02_no2_boxplots.png"), width = 1200, height = 600, res = 120)
-
-par(mfrow = c(1, 2), mar = c(8, 4, 4, 2) + 0.1) # Más margen inferior para los nombres de las estaciones
-
-# Boxplot Datos Originales
-boxplot(NIVEL_CONTAMINACION ~ ESTACION, data = dt_objetivo,
-        col = "tomato",
-        main = "Niveles de NO2 (Originales)",
-        ylab = expression("NO"[2]*" ("*mu*"g/m"^3*")"), 
-        las = 2,           
-        cex.axis = 0.6,    
-        outline = TRUE)    
-
-# Boxplot Datos Transformados
-boxplot(LOG_NIVEL ~ ESTACION, data = dt_objetivo,
-        col = "lightblue",
-        main = "Niveles de Ln(NO2) (Transformados)",
-        ylab = "Ln(NO2 + 1)", 
-        las = 2, 
-        cex.axis = 0.6,
-        outline = TRUE)
-
-par(mfrow = c(1, 1)) # Resetear los márgenes gráficos por defecto
-dev.off() 
-
-cat("✅ Script 02 completado con éxito. Gráficos guardados en output/figures/\n")
-
 #----------------------------------------------------------------------
 
 
@@ -176,4 +148,100 @@ print(plot(var_empirico, var_ajustado_v2,
 dev.off()
 
 cat("✅ Script 03 completado con éxito. Variogramas calculados y guardados.\n")
+
+
+# ==============================================================================
+# SECCIÓN 4: CORRELACIÓN ENTRE COVARIABLES CLIMÁTICAS
+# Objetivo: detectar multicolinealidad entre las variables explicativas antes
+# de introducirlas en el modelo INLA-SPDE, para evitar estimaciones inestables.
+# ==============================================================================
+
+library(ggplot2)
+library(data.table)
+library(here)
+
+# 1. Cargar el dataset maestro (incluye covariables crudas y estandarizadas)
+dt_maestro <- readRDS(here("data", "processed", "dataset_maestro_inla_2025_DIARIO.rds"))
+setDT(dt_maestro)
+
+# 2. Seleccionar valores crudos (sin estandarizar) para una correlación interpretable
+vars_clima_raw <- c("Temperatura_raw", "Humedad_Relativa_raw", "Precipitaciones_raw",
+                    "Presion Barométrica_raw", "Radiación Solar_raw")
+vars_clima_raw <- intersect(vars_clima_raw, names(dt_maestro))
+
+# Etiquetas legibles para los gráficos
+etiquetas <- c("Temperatura", "Humedad\nRelativa", "Precipitación",
+               "Presión\nBarométrica", "Radiación\nSolar")
+names(etiquetas) <- vars_clima_raw
+
+# 3. Calcular matriz de correlaciones de Pearson (excluyendo NAs)
+mat_cor <- dt_maestro[, ..vars_clima_raw] |>
+  na.omit() |>
+  as.matrix() |>
+  cor(method = "pearson")
+
+colnames(mat_cor) <- rownames(mat_cor) <- etiquetas[vars_clima_raw]
+
+cat("\n===== MATRIZ DE CORRELACIONES (Pearson) =====\n")
+print(round(mat_cor, 3))
+
+# 4. Convertir a formato largo para ggplot2
+dt_cor <- as.data.table(mat_cor, keep.rownames = "var1")
+dt_cor <- melt(dt_cor, id.vars = "var1", variable.name = "var2", value.name = "r")
+
+# Orden fijo para que el triángulo superior quede coherente
+orden_vars <- etiquetas[vars_clima_raw]
+dt_cor[, var1 := factor(var1, levels = orden_vars)]
+dt_cor[, var2 := factor(var2, levels = rev(orden_vars))]
+
+# Etiqueta de correlación: se muestra solo si |r| >= 0.3 para no saturar
+dt_cor[, label := ifelse(abs(r) >= 0.3, sprintf("%.2f", r), "")]
+
+# 5. Heatmap de correlaciones
+p_cor <- ggplot(dt_cor, aes(x = var1, y = var2, fill = r)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = label), size = 3.5, fontface = "bold") +
+  scale_fill_gradient2(
+    low      = "#2166AC",
+    mid      = "white",
+    high     = "#D6604D",
+    midpoint = 0,
+    limits   = c(-1, 1),
+    name     = "Correlación\nde Pearson"
+  ) +
+  labs(
+    title    = "Correlación entre covariables climáticas",
+    subtitle = "Valores interpolados diarios, estaciones NO₂ de Madrid (2025)",
+    x        = NULL, y = NULL,
+    caption  = paste0("n = ", dt_maestro[complete.cases(dt_maestro[, ..vars_clima_raw]), .N],
+                      " observaciones. Se muestran etiquetas si |r| ≥ 0.30.")
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x      = element_text(angle = 0, hjust = 0.5),
+    panel.grid       = element_blank(),
+    plot.title       = element_text(face = "bold"),
+    legend.position  = "right"
+  )
+
+print(p_cor)
+
+ggsave(here("output", "figures", "05_correlacion_covariables_clima.png"),
+       plot = p_cor, width = 7, height = 5.5, dpi = 150)
+
+# 6. Resumen interpretativo en consola
+cat("\n===== PARES CON CORRELACIÓN ALTA (|r| > 0.7) =====\n")
+dt_alta <- dt_cor[abs(r) > 0.7 & var1 != var2, .(var1, var2, r = round(r, 3))]
+# Eliminar duplicados del triángulo inferior
+dt_alta <- dt_alta[as.integer(var1) < as.integer(var2)]
+if (nrow(dt_alta) > 0) {
+  print(dt_alta)
+  cat("\n⚠️  Estas variables no deben introducirse juntas en el modelo INLA-SPDE\n")
+  cat("   sin regularización o selección previa, ya que pueden producir\n")
+  cat("   estimaciones inestables de efectos fijos.\n")
+} else {
+  cat("✅ Ningún par supera |r| = 0.70.\n")
+}
+
+cat("\n✅ Sección 4 completada. Heatmap guardado en output/figures/05_correlacion_covariables_clima.png\n")
 

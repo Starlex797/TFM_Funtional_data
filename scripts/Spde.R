@@ -8,8 +8,8 @@ library(here)
 library(sf)
 
 # 1. Cargar el dataset maestro y la malla (si estás en una sesión nueva)
-dt_maestro   <- readRDS(here("data", "processed", "dataset_maestro_inla_2025.rds"))
-malla_madrid <- readRDS(here("data", "processed", "malla_spde_madrid.rds"))
+dt_maestro   <- readRDS(here("data", "processed", "dataset_maestro_inla_2025_DIARIO.rds"))
+malla_madrid <- readRDS(here("data", "processed", "malla_spde_madrid_gruesa.rds"))
 setDT(dt_maestro)
 
 # MUY IMPORTANTE: Ordenamos estrictamente por tiempo y luego por estación.
@@ -20,21 +20,19 @@ setorder(dt_maestro, ID_TIEMPO, ESTACION)
 # ¿Cuántos días únicos hay en tu dataset? (Esto formará nuestro modelo AR1)
 ndays <- length(unique(dt_maestro$ID_TIEMPO))
 
-# 3. Extraer las coordenadas de todas las observaciones y pasarlas a Kilómetros
-# Primero, le decimos a R cuáles son nuestras coordenadas actuales (en grados WGS84)
-coords_temp <- st_as_sf(dt_maestro[, .(LONGITUD, LATITUD)], 
-                        coords = c("LONGITUD", "LATITUD"), 
-                        crs = 4326)
+# 3. Proyectar coordenadas a kilómetros (UTM 30N)
+# Solo proyectamos las 24 estaciones únicas y luego pegamos al maestro
+coords_unicas <- unique(dt_maestro[, .(ESTACION, LONGITUD, LATITUD)])
+coords_sf <- st_as_sf(coords_unicas, coords = c("LONGITUD", "LATITUD"), crs = 4326) |>
+  st_transform(25830)
+coords_unicas[, X_km := st_coordinates(coords_sf)[, 1] / 1000]
+coords_unicas[, Y_km := st_coordinates(coords_sf)[, 2] / 1000]
 
-# Segundo, las proyectamos a metros (UTM 30N)
-coords_utm <- st_transform(coords_temp, 25830)
+dt_maestro <- merge(dt_maestro, coords_unicas[, .(ESTACION, X_km, Y_km)],
+                    by = "ESTACION", all.x = TRUE)
+setorder(dt_maestro, ID_TIEMPO, ESTACION)
 
-# Tercero, extraemos la matriz de números y la dividimos entre 1000 para tener kilómetros
-coords_puntos <- st_coordinates(coords_utm) / 1000 
-
-# (Opcional) Si quieres guardar X_km e Y_km en tu tabla para el futuro:
-dt_maestro[, X_km := coords_puntos[, 1]]
-dt_maestro[, Y_km := coords_puntos[, 2]]
+coords_puntos <- as.matrix(dt_maestro[, .(X_km, Y_km)])
 
 # 4. Crear el objeto SPDE (El modelo matemático espacial de Matérn)
 # alpha = 2 es el estándar en R-INLA para superficies en 2D
@@ -71,15 +69,31 @@ A_espacial_s <- inla.spde.make.A(
   loc  = coords_puntos   # Sin 'group': proyección puramente espacial
 )
 
+# 7. GUARDAR LOS OBJETOS PARA EL PASO 4
+# Guardamos los objetos del modelo espacio-temporal
+saveRDS(spde,       here("data", "processed", "spde_madrid.rds"))
+saveRDS(indice_s,   here("data", "processed", "indice_s_madrid.rds"))
+saveRDS(A_espacial, here("data", "processed", "A_espacial_madrid.rds"))
+
+# Guardamos los objetos del modelo solo espacial (baseline)
+saveRDS(indice_s_solo, here("data", "processed", "indice_s_solo_madrid.rds"))
+saveRDS(A_espacial_s,  here("data", "processed", "A_espacial_s_madrid.rds"))
+
 # ------------------------------------------------------------------------------
-# CONTROL DE CALIDAD Y COMPROBACIÓN
+# VALIDACIÓN (el script se detiene si algo no cuadra)
 # ------------------------------------------------------------------------------
-cat("✅ ¡Paso 3 completado con éxito!\n")
-cat("- Nodos de la malla (Vértices):", malla_madrid$n, "\n")
-cat("- Días totales del modelo (Grupos):", ndays, "\n")
-cat("- Dimensiones de A_espacial (espacio-temporal):\n")
-cat("  -> Filas:", nrow(A_espacial), " | debe coincidir con nrow(dt_maestro):", nrow(dt_maestro), "\n")
-cat("  -> Columnas:", ncol(A_espacial), " | debe ser malla_madrid$n * ndays\n")
-cat("- Dimensiones de A_espacial_s (solo espacial):\n")
-cat("  -> Filas:", nrow(A_espacial_s), " | Columnas:", ncol(A_espacial_s),
-    " | debe ser malla_madrid$n:", malla_madrid$n, "\n")
+stopifnot("Filas de A_espacial != filas de dt_maestro" =
+            nrow(A_espacial) == nrow(dt_maestro))
+stopifnot("Columnas de A_espacial != nodos * días" =
+            ncol(A_espacial) == malla_madrid$n * ndays)
+stopifnot("Filas de A_espacial_s != filas de dt_maestro" =
+            nrow(A_espacial_s) == nrow(dt_maestro))
+stopifnot("Columnas de A_espacial_s != nodos de la malla" =
+            ncol(A_espacial_s) == malla_madrid$n)
+
+cat("Paso 3 completado.\n")
+cat("- Nodos de la malla:", malla_madrid$n, "\n")
+cat("- Días (grupos):", ndays, "\n")
+cat("- A_espacial:", nrow(A_espacial), "x", ncol(A_espacial), "\n")
+cat("- A_espacial_s:", nrow(A_espacial_s), "x", ncol(A_espacial_s), "\n")
+

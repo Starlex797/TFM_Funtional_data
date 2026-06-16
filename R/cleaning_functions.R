@@ -209,17 +209,8 @@ agregar_a_mensual<- function(dt, col_grupo = "ESTACION", col_fecha = "FECHA", co
   return(dt_mensual)
 }
 
-
-
-
-
-
 # ==============================================================================
-# FUNCIÓN DE LIMPIEZA DE METEOROLOGÍA (Formato Ancho por Covariable)
-# ==============================================================================
-
-# ==============================================================================
-# FUNCIÓN DE LIMPIEZA DE METEOROLOGÍA (Adaptada a tu CSV real)
+# Function to clean hourly meteorological data with spatial imputation and filtering
 # ==============================================================================
 
 limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
@@ -268,7 +259,7 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
   set(dt, j = "FECHA",    value = as.Date(sprintf("%04d-%02d-%02d", dt$ANO, dt$MES, dt$DIA)))
   
   # =========================================================================
-  # 5b. NUEVO: FILTRADO DE ESTACIONES Y ELIMINACIÓN DE RADIACIÓN SOLAR
+  # 5b. FILTRADO DE ESTACIONES Y VARIABLES NO DESEADAS
   # =========================================================================
   estaciones_objetivo <- c("Plaza España", "Ensanche de Vallecas", "Escuelas Aguirre", "Urb. Embajada (Barajas)", 
                            "Arturo Soria", "Plaza Elíptica", "Farolillo", "Sanchinarro", 
@@ -284,8 +275,9 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
   # Nos quedamos solo con las estaciones de la lista
   dt <- dt[ESTACION %in% estaciones_objetivo]
   
-  # Eliminamos la radiación solar (pasando a minúsculas por si lleva tilde en el diccionario)
-  dt <- dt[!tolower(MAGNITUD) %in% c("radiacion solar", "radiación solar")]
+  # Excluimos Dir. Viento  (todo en minúsculas para evitar fallos de case)
+  vars_excluir <- c("dir.viento")
+  dt <- dt[!tolower(MAGNITUD) %in% vars_excluir]
   # =========================================================================
   
   # 6. Borrado de columnas sobrantes
@@ -306,6 +298,297 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
                    value.var = "VALOR_METEO")
   
   return(dt_wide)
+}
+
+# ==============================================================================
+# FUNCIÓN: IMPUTACIÓN DE NA EN DATOS HORARIOS METEOROLÓGICOS
+# ==============================================================================
+# Estrategia en dos pasos por variable, solo para estaciones que la miden:
+#
+#   1. Interpolación lineal para huecos cortos (≤ maxgap horas consecutivas)
+#      dentro de la serie temporal de cada estación.
+#
+#   2. Fallback espacial: para los NA que persisten tras la interpolación,
+#      se toma el valor de la estación más cercana (distancia euclídea en km,
+#      usando X_km / Y_km) que tenga un valor válido para ese mismo
+#      FECHA × HORA.
+#
+# NOTA: Una estación se considera que NO mide una variable cuando el 100 % de
+# sus valores son NA (p. ej. una estación que no tiene pluviómetro). Esas
+# estaciones se ignoran completamente y sus NAs se dejan intactos.
+#
+# Argumentos:
+#   dt_horario – data.table en formato ancho (output de limpiar_datos_metereo):
+#                debe contener ESTACION, FECHA, HORA y una columna por variable
+#                climática.
+#   cols_clima – vector de nombres de columnas climáticas a imputar.
+#                Si NULL, se detectan automáticamente como todas las columnas
+#                numéricas que no pertenezcan al conjunto de identificadores.
+#   maxgap     – máximo número de horas consecutivas de NA que la interpolación
+#                lineal puede rellenar (por defecto 3).
+#
+# Devuelve el mismo data.table (copia) con NAs rellenados donde sea posible,
+# junto con un resumen por consola de cuántos valores se imputaron en cada paso.
+# ==============================================================================
+
+imputar_na_horario <- function(dt_horario,
+                               cols_clima = NULL,
+                               maxgap     = 3L) {
+
+  if (!requireNamespace("zoo", quietly = TRUE))
+    stop("El paquete 'zoo' es necesario para la interpolación lineal. ",
+         "Instálalo con install.packages('zoo').")
+
+  dt <- copy(dt_horario)
+  setDT(dt)
+
+  id_cols <- c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km",
+               "FECHA", "HORA")
+
+  if (is.null(cols_clima)) {
+    cols_clima <- setdiff(names(dt), id_cols)
+    cols_clima <- cols_clima[sapply(dt[, ..cols_clima], is.numeric)]
+  }
+
+  if (!all(c("X_km", "Y_km") %in% names(dt)))
+    stop("Las columnas X_km e Y_km son necesarias para la imputación espacial.")
+
+  # Numeric hour for correct ordering (H01 → 1, …, H24 → 24)
+  dt[, HORA_NUM := as.integer(gsub("H", "", as.character(HORA)))]
+  setorder(dt, ESTACION, FECHA, HORA_NUM)
+
+  cat("⏳ Imputación de NAs horarios (2 pasos)...\n")
+
+  for (v in cols_clima) {
+
+    na_antes <- sum(is.na(dt[[v]]))
+    if (na_antes == 0L) next
+
+    # Identify stations that truly measure this variable (< 100% NA)
+    est_mide <- dt[, .(pct_na = sum(is.na(get(v))) / .N), by = ESTACION][
+      pct_na < 1, ESTACION]
+
+    if (length(est_mide) == 0L) next
+
+    # --- Step 1: linear interpolation (maxgap) within each station ----------
+    dt[ESTACION %in% est_mide,
+       (v) := zoo::na.approx(get(v), maxgap = maxgap, na.rm = FALSE),
+       by = ESTACION]
+
+    na_post_interp <- sum(is.na(dt[[v]]))
+    n_interp <- na_antes - na_post_interp
+
+    # --- Step 2: fallback — nearest station with valid value at same FECHA × HORA ---
+    # For each timestamp still with NA, take the value of the geographically
+    # closest station (by Euclidean distance in km) that has a non-NA reading.
+    coords_est <- unique(dt[ESTACION %in% est_mide, .(ESTACION, X_km, Y_km)])
+
+    dt_na_rows <- dt[ESTACION %in% est_mide & is.na(get(v)), .(ESTACION, FECHA, HORA)]
+
+    if (nrow(dt_na_rows) > 0) {
+      timestamps_na <- unique(dt_na_rows[, .(FECHA, HORA)])
+
+      for (i in seq_len(nrow(timestamps_na))) {
+        f <- timestamps_na$FECHA[i]
+        h <- timestamps_na$HORA[i]
+
+        dt_ts <- dt[ESTACION %in% est_mide & FECHA == f & HORA == h,
+                    .(ESTACION, val = get(v))]
+
+        missing_ests <- dt_ts[is.na(val), ESTACION]
+        valid_dt     <- merge(dt_ts[!is.na(val)], coords_est, by = "ESTACION")
+
+        if (length(missing_ests) == 0L || nrow(valid_dt) == 0L) next
+
+        for (est in missing_ests) {
+          cx <- coords_est[ESTACION == est, X_km]
+          cy <- coords_est[ESTACION == est, Y_km]
+          if (length(cx) == 0L || is.na(cx)) next
+
+          dists    <- sqrt((valid_dt$X_km - cx)^2 + (valid_dt$Y_km - cy)^2)
+          best_val <- valid_dt$val[which.min(dists)]
+
+          dt[ESTACION == est & FECHA == f & HORA == h, (v) := best_val]
+        }
+      }
+    }
+
+    na_post_spatial <- sum(is.na(dt[[v]]))
+    n_spatial <- na_post_interp - na_post_spatial
+
+    cat(sprintf("   %-22s | antes: %6d NA → interp: -%d, est. cercana: -%d → quedan: %d NA\n",
+                v, na_antes, n_interp, n_spatial, na_post_spatial))
+  }
+
+  dt[, HORA_NUM := NULL]
+  cat("   ✅ Imputación completada.\n")
+
+  return(dt)
+}
+
+
+# ==============================================================================
+# FUNCIÓN: Cargar datos crudos meteorológicos para un año dado
+#
+# Busca primero un CSV anual único con patrón "{anio}_datos_metereo.csv".
+# Si no existe, combina todos los CSVs mensuales encontrados recursivamente
+# dentro de la carpeta del año.
+# ==============================================================================
+cargar_datos_metereo_anual <- function(anio, carpeta_base) {
+  
+  carpeta_anio <- file.path(carpeta_base, as.character(anio))
+  
+  if (!dir.exists(carpeta_anio))
+    stop("No existe la carpeta para el año ", anio, ": ", carpeta_anio)
+  
+  # Intento 1: archivo CSV anual único
+  ruta_anual <- file.path(carpeta_anio, paste0(anio, "_datos_metereo.csv"))
+  
+  if (file.exists(ruta_anual)) {
+    message("  -> Cargando archivo anual único: ", basename(ruta_anual))
+    return(fread(ruta_anual, sep = ";"))
+  }
+  
+  # Intento 2: archivos mensuales en subcarpetas
+  archivos_csv <- list.files(carpeta_anio, pattern = "\\.csv$",
+                             full.names = TRUE, recursive = TRUE,
+                             ignore.case = TRUE)
+  
+  if (length(archivos_csv) == 0)
+    stop("No se encontraron archivos CSV en: ", carpeta_anio)
+  
+  message("  -> Encontrados ", length(archivos_csv),
+          " archivo(s) mensual(es). Combinando...")
+  
+  lista_meses <- lapply(archivos_csv, function(ruta) {
+    dt <- tryCatch(
+      fread(ruta, sep = ";", encoding = "Latin-1"),
+      error = function(e) {
+        warning("Error leyendo ", basename(ruta), ": ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(dt))
+      message("    OK  ", basename(ruta), " (", nrow(dt), " filas)")
+    dt
+  })
+  
+  lista_meses <- Filter(Negate(is.null), lista_meses)
+  
+  if (length(lista_meses) == 0)
+    stop("No se pudo leer ningún archivo correctamente.")
+  
+  dt_anual <- rbindlist(lista_meses, use.names = TRUE, fill = TRUE)
+  message("  -> Total filas combinadas: ", nrow(dt_anual))
+  return(dt_anual)
+}
+
+# ==============================================================================
+# FUNCIÓN: Procesar un año completo → devuelve lista con $diario y $mensual
+# ==============================================================================
+procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
+  
+  cat("\n", strrep("=", 60), "\n")
+  cat("  Procesando año:", anio, "\n")
+  cat(strrep("=", 60), "\n")
+  
+  # 1. Carga de datos brutos
+  cat("⏳ Cargando datos...\n")
+  dt_ubicaciones <- as.data.table(
+    read.csv(ruta_estaciones, sep = ";", fileEncoding = "latin1")
+  )
+  data_raw <- cargar_datos_metereo_anual(anio, carpeta_base)
+  
+  # 2. Limpieza y reestructuración
+  cat("⏳ Limpiando y reestructurando...\n")
+  datos_horarios <- limpiar_datos_metereo(data_raw, dt_ubicaciones)
+  
+  cols_clima <- setdiff(
+    names(datos_horarios),
+    c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km", "FECHA", "HORA")
+  )
+  
+  # 2b. Imputación de NAs horarios (interpolación lineal + día anterior)
+  cat("⏳ Imputando NAs horarios...\n")
+  datos_horarios <- imputar_na_horario(datos_horarios,
+                                       cols_clima = cols_clima,
+                                       maxgap     = 3L)
+  
+  # 3. Agregación diaria (umbral 20% NA)
+  # Precipitaciones → suma diaria; resto de variables → media diaria
+  cat("⏳ Agregando a escala diaria...\n")
+  by_diario  <- c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km", "FECHA")
+  cols_suma  <- intersect("Precipitaciones", cols_clima)
+  cols_media <- setdiff(cols_clima, cols_suma)
+
+  dt_media <- if (length(cols_media) > 0) {
+    datos_horarios[, lapply(.SD, function(x) {
+      if (sum(is.na(x)) / .N >= 0.2) NA_real_ else mean(x, na.rm = TRUE)
+    }), by = by_diario, .SDcols = cols_media]
+  } else {
+    unique(datos_horarios[, ..by_diario])
+  }
+
+  datos_diarios <- if (length(cols_suma) > 0) {
+    dt_suma <- datos_horarios[, lapply(.SD, function(x) {
+      if (sum(is.na(x)) / .N >= 0.2) NA_real_ else sum(x, na.rm = TRUE)
+    }), by = by_diario, .SDcols = cols_suma]
+    merge(dt_media, dt_suma, by = by_diario)
+  } else {
+    dt_media
+  }
+  
+  datos_diarios <- datos_diarios[year(FECHA) == anio]
+  datos_diarios[, ANO := anio]
+  setorder(datos_diarios, FECHA)
+  
+  cat("  ✅ Diario:", nrow(datos_diarios), "filas |",
+      uniqueN(datos_diarios$ESTACION), "estaciones |",
+      uniqueN(datos_diarios$FECHA), "días\n")
+  
+  # 4. Agregación mensual (umbral 20% NA)
+  # Fuente: datos_diarios (ya filtrados y con NAs resueltos a escala diaria)
+  # Precipitaciones → suma de totales diarios; resto → media de medias diarias
+  cat("⏳ Agregando a escala mensual...\n")
+  cols_grupo_m <- c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km")
+
+  mens_media <- if (length(cols_media) > 0) {
+    convertir_resolucion(
+      dt           = datos_diarios,
+      a            = "mensual",
+      col_fecha    = "FECHA",
+      cols_grupo   = cols_grupo_m,
+      cols_valores = cols_media,
+      umbral_na    = 0.2,
+      fun_agr      = mean
+    )
+  } else NULL
+
+  datos_mensuales <- if (length(cols_suma) > 0) {
+    mens_suma <- convertir_resolucion(
+      dt           = datos_diarios,
+      a            = "mensual",
+      col_fecha    = "FECHA",
+      cols_grupo   = cols_grupo_m,
+      cols_valores = cols_suma,
+      umbral_na    = 0.2,
+      fun_agr      = sum
+    )
+    if (!is.null(mens_media)) merge(mens_media, mens_suma, by = c(cols_grupo_m, "MES"))
+    else mens_suma
+  } else {
+    mens_media
+  }
+  
+  datos_mensuales <- datos_mensuales[substr(MES, 1, 4) == as.character(anio)]
+  datos_mensuales[, ANO := anio]
+  setorder(datos_mensuales, MES, ESTACION)
+  
+  cat("  ✅ Mensual:", nrow(datos_mensuales), "filas |",
+      uniqueN(datos_mensuales$ESTACION), "estaciones |",
+      uniqueN(datos_mensuales$MES), "meses\n")
+  
+  return(list(horario=datos_horarios,diario = datos_diarios, mensual = datos_mensuales))
 }
 
 #-----------------------------------------------------------------------------
@@ -611,121 +894,5 @@ limpiar_nombres <- function(texto) {
 }
 
 
-# ==============================================================================
-# FUNCIÓN: Cargar datos crudos meteorológicos para un año dado
-#
-# Busca primero un CSV anual único con patrón "{anio}_datos_metereo.csv".
-# Si no existe, combina todos los CSVs mensuales encontrados recursivamente
-# dentro de la carpeta del año.
-# ==============================================================================
-cargar_datos_metereo_anual <- function(anio, carpeta_base) {
-  
-  carpeta_anio <- file.path(carpeta_base, as.character(anio))
-  
-  if (!dir.exists(carpeta_anio))
-    stop("No existe la carpeta para el año ", anio, ": ", carpeta_anio)
-  
-  # Intento 1: archivo CSV anual único
-  ruta_anual <- file.path(carpeta_anio, paste0(anio, "_datos_metereo.csv"))
-  
-  if (file.exists(ruta_anual)) {
-    message("  -> Cargando archivo anual único: ", basename(ruta_anual))
-    return(fread(ruta_anual, sep = ";"))
-  }
-  
-  # Intento 2: archivos mensuales en subcarpetas
-  archivos_csv <- list.files(carpeta_anio, pattern = "\\.csv$",
-                             full.names = TRUE, recursive = TRUE,
-                             ignore.case = TRUE)
-  
-  if (length(archivos_csv) == 0)
-    stop("No se encontraron archivos CSV en: ", carpeta_anio)
-  
-  message("  -> Encontrados ", length(archivos_csv),
-          " archivo(s) mensual(es). Combinando...")
-  
-  lista_meses <- lapply(archivos_csv, function(ruta) {
-    dt <- tryCatch(
-      fread(ruta, sep = ";", encoding = "Latin-1"),
-      error = function(e) {
-        warning("Error leyendo ", basename(ruta), ": ", conditionMessage(e))
-        NULL
-      }
-    )
-    if (!is.null(dt))
-      message("    OK  ", basename(ruta), " (", nrow(dt), " filas)")
-    dt
-  })
-  
-  lista_meses <- Filter(Negate(is.null), lista_meses)
-  
-  if (length(lista_meses) == 0)
-    stop("No se pudo leer ningún archivo correctamente.")
-  
-  dt_anual <- rbindlist(lista_meses, use.names = TRUE, fill = TRUE)
-  message("  -> Total filas combinadas: ", nrow(dt_anual))
-  return(dt_anual)
-}
 
-# ==============================================================================
-# FUNCIÓN: Procesar un año completo → devuelve lista con $diario y $mensual
-# ==============================================================================
-procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
-  
-  cat("\n", strrep("=", 60), "\n")
-  cat("  Procesando año:", anio, "\n")
-  cat(strrep("=", 60), "\n")
-  
-  # 1. Carga de datos brutos
-  cat("⏳ Cargando datos...\n")
-  dt_ubicaciones <- as.data.table(
-    read.csv(ruta_estaciones, sep = ";", fileEncoding = "latin1")
-  )
-  data_raw <- cargar_datos_metereo_anual(anio, carpeta_base)
-  
-  # 2. Limpieza y reestructuración
-  cat("⏳ Limpiando y reestructurando...\n")
-  datos_horarios <- limpiar_datos_metereo(data_raw, dt_ubicaciones)
-  
-  cols_clima <- setdiff(
-    names(datos_horarios),
-    c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km", "FECHA", "HORA")
-  )
-  
-  # 3. Agregación diaria (umbral 20% NA)
-  cat("⏳ Agregando a escala diaria...\n")
-  datos_diarios <- datos_horarios[, lapply(.SD, function(x) {
-    if (sum(is.na(x)) / .N >= 0.2) NA_real_ else mean(x, na.rm = TRUE)
-  }), by = .(ESTACION, LONGITUD, LATITUD, X_km, Y_km, FECHA),
-  .SDcols = cols_clima]
-  
-  datos_diarios <- datos_diarios[year(FECHA) == anio]
-  datos_diarios[, ANO := anio]
-  setorder(datos_diarios, FECHA)
-  
-  cat("  ✅ Diario:", nrow(datos_diarios), "filas |",
-      uniqueN(datos_diarios$ESTACION), "estaciones |",
-      uniqueN(datos_diarios$FECHA), "días\n")
-  
-  # 4. Agregación mensual (umbral 20% NA)
-  cat("⏳ Agregando a escala mensual...\n")
-  datos_mensuales <- convertir_resolucion(
-    dt           = datos_horarios,
-    a            = "mensual",
-    col_fecha    = "FECHA",
-    cols_grupo   = c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km"),
-    cols_valores = cols_clima,
-    umbral_na    = 0.2
-  )
-  
-  datos_mensuales <- datos_mensuales[substr(MES, 1, 4) == as.character(anio)]
-  datos_mensuales[, ANO := anio]
-  setorder(datos_mensuales, MES, ESTACION)
-  
-  cat("  ✅ Mensual:", nrow(datos_mensuales), "filas |",
-      uniqueN(datos_mensuales$ESTACION), "estaciones |",
-      uniqueN(datos_mensuales$MES), "meses\n")
-  
-  return(list(horario=datos_horarios,diario = datos_diarios, mensual = datos_mensuales))
-}
 
