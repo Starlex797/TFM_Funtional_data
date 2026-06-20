@@ -1,6 +1,5 @@
 # ==============================================================================
-# CARGA, LIMPIEZA Y AGREGACIÓN DE DATOS METEOROLÓGICOS — MULTI-ANUAL
-# Genera tres RDS independientes por año: horario, diario y mensual
+# Preprocesing climatological data 
 # ==============================================================================
 
 library(tidyverse)
@@ -11,21 +10,27 @@ source(here("R", "dictionaries.R"))
 source(here("R", "cleaning_functions.R"))
 
 # ==============================================================================
-# PARÁMETRO: AÑOS A PROCESAR
-# Añade o elimina años según los datos disponibles en data/raw/Datos metereologicos/
+# Years to be processed
 # ==============================================================================
+
 anios_procesar <- c(2022, 2025)
 
 
 
 # ==============================================================================
-# BUCLE PRINCIPAL: procesar y guardar cada año por separado
+# Principal loop to process each year
 # ==============================================================================
+
+# Select the base folder and the stations file
 carpeta_base_meteo <- here("data", "raw", "Datos metereologicos")
 ruta_estaciones    <- here("data", "raw", "Datos metereologicos",
                            "Estaciones_2019", "estaciones.csv")
 
 anios_ok <- character(0)
+
+# Loop in order to process each year and save the three levels of resolution
+# (hourly, daily, monthly). TryCatch is used to handle errors and continue
+# processing the next year if an error occurs.
 
 for (anio in anios_procesar) {
   
@@ -39,7 +44,7 @@ for (anio in anios_procesar) {
   
   if (is.null(resultado)) next
   
-  # Guardar los tres niveles de resolución para este año
+  # Save the processed data to RDS files
   cat("\n💾 Guardando archivos del año", anio, "...\n")
   
   ruta_h <- here("data", "processed","Clima","horario", paste0("meteo_madrid_", anio, "_horario.rds"))
@@ -58,7 +63,7 @@ for (anio in anios_procesar) {
 }
 
 # ==============================================================================
-# RESUMEN FINAL
+# Summary of the processing results
 # ==============================================================================
 cat("\n", strrep("=", 60), "\n")
 if (length(anios_ok) == 0) {
@@ -70,8 +75,7 @@ if (length(anios_ok) == 0) {
   cat(strrep("=", 60), "\n")
 }
 
-# Chequear los datos 
 
-horario_2025<-readRDS(here("data", "processed","Clima","horario","meteo_madrid_2022_horario.rds"))
+horario_2025<-readRDS(here("data", "processed","Clima","diario","meteo_madrid_2022_diario.rds"))
 view(horario_2025)
 

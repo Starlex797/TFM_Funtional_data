@@ -1,18 +1,16 @@
 # ==============================================================================
-# ANÁLISIS DE CORRELACIÓN ESPACIAL — MADRID 2025
-# ------------------------------------------------------------------------------
-# Estructura del script:
-#   1. Librerías y parámetros globales
-#   2. Carga y preparación de datos (NO2 + clima)
-#   3. Variogramas experimentales (variables con n ≥ 20 estaciones)
-#   4. Índice de Moran Global: MC (999 perm.) + analítico (todas las variables)
-#   5. Análisis de robustez: k-vecinos vs distancia euclidiana (5 km)
-#   6. Guardar todos los resultados
+# EDA 2025
+#===============================================================================
+# Structure of the analysis:
+#   1. Variogramas experimentales (variables con n ≥ 20 estaciones)
+#   2. Índice de Moran Global: MC (999 perm.) + analítico (todas las variables)
+#   3. Análisis de robustez: k-vecinos vs distancia euclidiana (5 km)
+#   4. Guardar todos los resultados
 # ==============================================================================
 
 
 # ==============================================================================
-# 1. LIBRERÍAS Y PARÁMETROS GLOBALES
+# Library imports
 # ==============================================================================
 library(data.table)
 library(sf)
@@ -25,11 +23,12 @@ library(gridExtra)
 library(grid)
 library(here)
 
+# Hyperparameters for Moran's I and variogram calculations
 set.seed(4712)
-NSIM      <- 999   # permutaciones Monte Carlo
-CUTOFF_KM <- 20    # distancia máxima variograma (km)
-WIDTH_KM  <- 4    # anchura de bin variograma (km)
-N_MIN_VAR <- 20    # mínimo de estaciones para calcular variograma
+NSIM      <- 999   # Montecarlo Permutations for Moran's I
+CUTOFF_KM <- 20    # distance max for  variograma (km)
+WIDTH_KM  <- 4     # width for variograma (km)
+N_MIN_VAR <- 20    # min stations to calculate variogram
 
 carpeta_correlacion <- here("outputs", "correlacion_espacial")
 
@@ -41,11 +40,13 @@ dir.create(carpeta_correlacion, showWarnings = FALSE, recursive = TRUE)
 # ==============================================================================
 
 # NO2 diario → media anual por estación
-dt_aire_raw  <- readRDS(here("data", "processed", "contaminacion", "diario",
+dt_aire_raw  <- readRDS(here("data", "processed", "contaminacion", "mensual",
+                             "aire_madrid_2025_log_No2_mensuales.rds"))
+dt_aire_diario<- readRDS(here("data", "processed", "Contaminacion", "diario",
                              "aire_madrid_2025_No2_trans_diarios.rds"))
 prueba<- View(dt_aire_raw)
-dt_no2_anual <- dt_aire_raw[!is.na(DATO_DIARIO), .(
-  valor    = mean(DATO_DIARIO, na.rm = TRUE),
+dt_no2_anual <- dt_aire_raw[!is.na(DATO_MENSUAL), .(
+  valor    = mean(DATO_MENSUAL, na.rm = TRUE),
   LONGITUD = unique(LONGITUD),
   LATITUD  = unique(LATITUD)
 ), by = ESTACION]
@@ -58,9 +59,12 @@ dt_meteo <- readRDS(here("data", "processed", "Clima", "mensual",
 dt_traf_mensual_dist <- readRDS(here("data", "processed",
                                      "trafico_madrid_2025_mensual_distrito.rds"))
 
-vars_clima   <- c("Temperatura", "Humedad_Relativa","Precipitaciones", "Presion Barométrica","Radiación Solar")
-labels_clima <- c("Temperatura (°C)", "Humedad Relativa (%)", "Precipitaciones (mm)", "Presión Barométrica (hPa)","Radiación Solar (W/h)")
+vars_clima   <- c("Temperatura", "Humedad_Relativa","Precipitaciones", "Presion Barométrica","Radiación Solar","Velocidad Viento")
+labels_clima <- c("Temperatura (°C)", "Humedad Relativa (%)", "Precipitaciones (mm)", "Presión Barométrica (hPa)","Radiación Solar (W/h)","Velocidad Viento (m/s)")
 
+# We are calculating the mean annual value for each climate variable by station, excluding NA values. 
+# The result is stored in a list where each element corresponds to a climate variable and contains a data.table 
+# with the mean value, longitude, and latitude for each station.
 lista_clima <- setNames(
   lapply(vars_clima, function(v) {
     dt_meteo[!is.na(get(v)), .(
@@ -76,18 +80,22 @@ lista_clima <- setNames(
 todos_datos <- c(list("NO2 (µg/m³)" = dt_no2_anual), lista_clima)
 print(head(todos_datos))
 cat("Número de estaciones por variable:\n")
+# Number of stations per climate variable 
 for (nm in names(todos_datos)) {
   elegible_var <- if (nrow(todos_datos[[nm]]) >= N_MIN_VAR) "  ← variograma" else ""
   cat(sprintf("  %-30s n = %2d%s\n", nm, nrow(todos_datos[[nm]]), elegible_var))
 }
 
 
+#===============================================================================
+# Block 1: Studying the temporal evolution of climate variables and the spatial variability between stations
+# and contamination levels, using line plots and coefficient of variation (CV) between stations for each month.
 # ==============================================================================
-# 2b. LÍNEAS TEMPORALES POR ESTACIÓN — DATOS MENSUALES
+# Montly assessment of climate variables (line plots + CV between stations)
 # ==============================================================================
-# Gráficos de líneas (una por estación) para cada variable climatológica.
-# Objetivo: detectar visualmente si las estaciones siguen patrones similares
-# (correlación espacial) o si hay estaciones con comportamiento diferenciado.
+# Line plots are faceted by variable, and a separate plot shows the coefficient of variation (CV)
+# between stations for each month.
+# Goal: to assess the temporal evolution of climate variables and the spatial variability between stations.
 # ==============================================================================
 
 dt_largo <- melt(
@@ -212,7 +220,7 @@ cat("✅ Gráficos de líneas y CV guardados en:\n  ", carpeta_correlacion, "\n"
 # ==============================================================================
 
 # ── 2c.1 Escala mensual ────────────────────────────────────────────────────────
-dt_diario_no2 <- dt_aire_raw[!is.na(DATO_DIARIO)]
+dt_diario_no2 <- dt_aire_diario[!is.na(DATO_DIARIO)]
 dt_diario_no2[, Mes_num := as.integer(format(FECHA, "%m"))]
 
 plot_perfil_mensual <- ggplot(dt_diario_no2,
@@ -319,8 +327,10 @@ plot_perfil_horario <- ggplot(dt_hora_resumen,
 print(plot_perfil_horario)
 
 
+# ===============================================================================
+# Correlation between stations for each climate variable, No2 and traffic variables
 # ==============================================================================
-# 2e. HOMOGENEIDAD ESPACIAL — CORRELACIONES TEMPORALES ENTRE ESTACIONES
+# HOMOGENEIDAD ESPACIAL — CORRELACIONES TEMPORALES ENTRE ESTACIONES
 # ==============================================================================
 # Para cada variable climática, pivoteamos a formato ancho (una columna por
 # estación) y calculamos la correlación de Pearson entre todos los pares usando
@@ -420,7 +430,9 @@ plot_homogeneidad_resumen <- ggplot(resumen_2025,
         legend.position = "bottom",
         legend.title    = element_blank())
 
-print(plot_homogeneidad_resumen)
+print(plot_homogeneidad_resumen) # Esto está mal, no me puedo fiar de lo que hay aqui
+# El problema es que hago la media y justo las precipitaciones y la velocidad del viento 
+# SOn las dos únicas que no puedo hacer la media. 
 
 # ── Heatmaps por variable (2025) ────────────────────────────────────────────
 plots_heatmaps <- list()
@@ -452,6 +464,32 @@ for (v in vars_clima) {
   plots_heatmaps[[v]] <- p
   print(p)
 }
+
+#=======================================================
+# Correlation  climate variable,
+# No2 and traffic variables
+#========================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ==============================================================================

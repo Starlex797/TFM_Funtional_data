@@ -13,3 +13,5 @@ data/
 .RDataTmp
 .Rproj.user
 .positai
+echo .RData* 
+echo .Rhistory 

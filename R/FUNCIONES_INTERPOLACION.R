@@ -38,7 +38,7 @@ library(here)
 interpolar_idw_clima <- function(dt_meteo,
                                  dt_objetivo,
                                  variables = c("Temperatura", "Humedad_Relativa","Precipitaciones",
-                                               "Presion_Barometrica", "Radiacion_Solar"),
+                                               "Presion_Barometrica", "Radiacion_Solar","Velocidad_Viento"),
                                  idp       = 2,
                                  min_estaciones = 3,
                                  crs_orig  = 4326,

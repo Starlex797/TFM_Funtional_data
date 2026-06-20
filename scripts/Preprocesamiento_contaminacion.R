@@ -60,8 +60,9 @@ for (anio in anios_analisis) {
   # Skip cleaning if loading failed
   if (is.null(dt_temporal)) next
   
-  # Clean and store
+  # Clean and store (keep only rows belonging to the target year)
   dt_limpio <- limpiar_aire_madrid(dt_temporal, dt_ubicaciones_aire)
+  dt_limpio <- dt_limpio[year(FECHA) == anio]
   lista_historico_aire[[as.character(anio)]] <- dt_limpio
   cat("  ✅ Limpieza completada:", nrow(dt_limpio), "filas |",
       uniqueN(dt_limpio$ESTACION), "estaciones\n")
@@ -165,4 +166,14 @@ for (anio in names(lista_historico_aire)) {
 
 cat("\n✅ Pipeline NO2 completado para todos los años (horario, diario y mensual).\n")
 
+## Checking all the cleaning data 
+
+check_1<-readRDS(here("data", "processed","contaminacion","horario","aire_madrid_2025_No2_horarios.rds"))
+View(check_1)
+
+check_2<-readRDS(here("data", "processed","contaminacion","diario", "aire_madrid_2025_No2_trans_diarios.rds"))
+View(check_2)
+
+check_3<-readRDS(here("data", "processed","contaminacion","mensual", "aire_madrid_2025_log_No2_mensuales.rds"))
+View(check_3)
 

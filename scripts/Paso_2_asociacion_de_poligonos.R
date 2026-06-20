@@ -1,5 +1,6 @@
 # ==============================================================================
-# PASO 2: ASOCIACIÓN DE POLÍGONOS, TRÁFICO Y METEOROLOGÍA (EL CRUCE MAESTRO)
+# Step 2: Creation of a dataset that unifies the three datasets (pollution, traffic, and meteorology) 
+# at the daily level for 2025.
 # ==============================================================================
 
 library(data.table)
@@ -9,11 +10,16 @@ library(here)
 source(here("R", "cleaning_functions.R"))
 source(here("R", "FUNCIONES_INTERPOLACION.R"))
 
-# 0. EL TRUCO PARA EL ERROR DE "DUPLICATE VERTEX"
-# Apagamos el motor de geometría esférica (S2) temporalmente
+
+
+#===============================================================================
+# Daily data 
+#===============================================================================
+
+# Desactivate the S2 engine to avoid issues with spatial operations
 sf_use_s2(FALSE) 
 
-# 1. Cargar los tres datasets diarios limpios desde 'data/processed'
+# 1. Load the three datasets (pollution, traffic, and meteorology) at the daily level for 2025
 dt_no2     <- readRDS(here("data", "processed","Contaminacion","diario","aire_madrid_2025_No2_trans_diarios.rds"))
 dt_trafico <- readRDS(here("data", "processed","trafico_madrid_2025_diario_barrio.rds"))
 dt_meteo   <- readRDS(here("data", "processed","Clima","diario", "meteo_madrid_2025_diario.rds"))
@@ -21,15 +27,10 @@ setDT(dt_no2)
 setDT(dt_trafico)
 setDT(dt_meteo)
 
-# Filtramos solo el año 2025
-dt_no2     <- dt_no2[year(FECHA) == 2025]
-dt_trafico <- dt_trafico[year(FECHA) == 2025]
-dt_meteo   <- dt_meteo[year(FECHA) == 2025]
+# Normalization of the barrio names in the traffic dataset
+dt_trafico[, barrio := limpiar_nombres(barrio)]
 
-# Normalizamos los nombres de distrito en tráfico
-dt_trafico[, distrito := limpiar_nombres(distrito)]
-
-# 2. Cargar geometrías de distritos y barrios, reparar y proyectar a UTM
+# 2. Load the geometries of the districts and neighborhoods of Madrid
 mapa_distritos <- st_read(here("data", "raw", "geometrias", "madrid_distritos.geojson"), quiet = TRUE) |>
   st_make_valid() |> st_transform(25830)
 mapa_distritos$distrito <- limpiar_nombres(mapa_distritos$name)
@@ -38,26 +39,25 @@ mapa_barrios <- st_read(here("data", "raw", "Geometrias", "BARRIOS.shp"), quiet 
   st_make_valid() |> st_transform(25830)
 mapa_barrios$barrio <- tolower(trimws(mapa_barrios$NOMBRE))
 
-# Normalizamos el nombre de barrio en tráfico al mismo formato
-dt_trafico[, barrio := tolower(trimws(barrio))]
 
-# 3. CRUCE ESPACIAL: ¿En qué distrito y barrio se ubica cada estación de NO2?
+# 3. Assigning districts and neighborhoods to the pollution stations
 estaciones_coords <- unique(dt_no2[, .(ESTACION, LONGITUD, LATITUD)])
 estaciones_sf <- st_as_sf(estaciones_coords, coords = c("LONGITUD", "LATITUD"), crs = 4326) |>
   st_transform(25830)
 
-# Asignamos distrito
+# Assign district
 est_distrito <- st_join(estaciones_sf, mapa_distritos[, "distrito"], join = st_intersects)
-# Asignamos barrio
+
+# Assign neighborhood
 est_barrio <- st_join(estaciones_sf, mapa_barrios[, "barrio"], join = st_intersects)
 
+# Create a table with the station, district, and neighborhood
 dt_est_geo <- merge(
   as.data.table(est_distrito)[, .(ESTACION, distrito)],
   as.data.table(est_barrio)[, .(ESTACION, barrio)],
   by = "ESTACION"
 )
 
-# Sincronizamos distrito y barrio en el dataset de contaminación
 dt_no2 <- merge(dt_no2, dt_est_geo, by = "ESTACION", all.x = TRUE)
 
 # 4. INTEGRACIÓN DE LA METEOROLOGÍA (IDW diario por estación)
@@ -69,7 +69,7 @@ dt_clima_interp <- interpolar_idw_clima(
   dt_meteo    = dt_meteo,
   dt_objetivo = coords_no2,
   variables   = c("Temperatura", "Humedad_Relativa", "Precipitaciones",
-                  "Presion Barométrica", "Radiación Solar")
+                  "Presion Barométrica", "Radiación Solar","Velocidad Viento")
 )
 
 # Guardamos una copia para no recalcular
