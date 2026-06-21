@@ -465,12 +465,58 @@ for (v in vars_clima) {
   print(p)
 }
 
-#=======================================================
-# Correlation  climate variable,
-# No2 and traffic variables
-#========================================================
+# ==============================================================================
+# Correlation heatmap: NO2, climate variables and traffic variables
+# ==============================================================================
+# Uses the daily master dataset (dataset_maestro_inla_2025_DIARIO.rds) built in
+# Paso 2. Pearson correlation on raw-scale variables (result is identical to
+# standardised variables because correlation is invariant to linear transforms).
+# ==============================================================================
 
+library(reshape2)
 
+dt_maestro_eda <- readRDS(here("data", "processed",
+                               "dataset_maestro_inla_2025_DIARIO.rds"))
+
+cols_no2_hm     <- "DATO_DIARIO"
+cols_trafico_hm <- c("intensidad_raw", "carga_raw")
+cols_clima_hm   <- c("Temperatura_raw", "Humedad_Relativa_raw",
+                      "Precipitaciones_raw", "Presion Barométrica_raw",
+                      "Radiación Solar_raw", "Velocidad Viento_raw")
+
+all_cols_hm <- c(cols_no2_hm, cols_trafico_hm, cols_clima_hm)
+
+cor_mat_hm <- cor(dt_maestro_eda[, ..all_cols_hm], use = "pairwise.complete.obs")
+
+labels_hm <- c("NO2", "Intensidad", "Carga",
+               "Temperatura", "Humedad Rel.", "Precipitaciones",
+               "Presión Barom.", "Radiación Solar", "Vel. Viento")
+rownames(cor_mat_hm) <- labels_hm
+colnames(cor_mat_hm) <- labels_hm
+
+cor_long_hm <- as.data.table(melt(cor_mat_hm,
+                                   varnames = c("Var1", "Var2"),
+                                   value.name = "cor"))
+cor_long_hm[, Var1 := factor(Var1, levels = rev(labels_hm))]
+cor_long_hm[, Var2 := factor(Var2, levels = labels_hm)]
+
+plot_heatmap_cor <- ggplot(cor_long_hm, aes(Var2, Var1, fill = cor)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(cor, 2)), size = 3) +
+  scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B",
+                       midpoint = 0, limits = c(-1, 1), name = "Correlación") +
+  labs(title = "Correlación: NO2, Variables Climáticas y Tráfico",
+       subtitle = "Datos diarios · Madrid 2025",
+       x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(plot_heatmap_cor)
+
+ggsave(file.path(carpeta_correlacion, "00j_Heatmap_Correlacion_NO2_Clima_Trafico.png"),
+       plot = plot_heatmap_cor, width = 10, height = 8, dpi = 300)
+
+rm(dt_maestro_eda)
 
 
 

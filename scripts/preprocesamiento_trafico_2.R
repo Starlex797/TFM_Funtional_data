@@ -139,7 +139,7 @@ for (mes in meses) {
 
     cat("ÉXITO:", mes, "guardado (horario raw, horario por zona, diario y mensual).\n")
 
-    rm(dt_raw, dt_ubi, dt_horario)
+    rm(dt_raw, dt_ubi, dt_horario_barrio)
     gc()
 
   } else {

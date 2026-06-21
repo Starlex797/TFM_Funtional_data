@@ -66,62 +66,98 @@ cat("Vértices Malla Gruesa:", malla_gruesa$n, "\n")
 cat("Vértices Malla Media:", malla_media$n, "\n")
 cat("Vértices Malla Fina:", malla_fina$n, "\n")
 
-#-----------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------
-# VISUALIZACIÓN COMPARATIVA DE MALLAS
-#-----------------------------------------------------------------------------------
+# ==============================================================================
+# VISUALIZACIÓN: ESTACIONES DE NO2 SOBRE LAS MALLAS SPDE
+# ==============================================================================
 library(ggplot2)
-library(sf)
 library(fmesher)
-library(here)
-library(gridExtra) # Para poner los gráficos uno al lado del otro
+library(gridExtra)
 
-# 1. Cargar el mapa de distritos original
-mapa_distritos <- st_read(here("data", "raw", "geometrias", "madrid_distritos.geojson"))
+carpeta_figuras_mallas <- here("output", "figures", "mallas")
+if (!dir.exists(carpeta_figuras_mallas)) dir.create(carpeta_figuras_mallas, recursive = TRUE)
 
-# 2. Asegurarnos de que está en el CRS oficial (25830 - metros) y pasarlo a KILÓMETROS
-mapa_distritos_utm <- st_transform(mapa_distritos, 25830)
-st_geometry(mapa_distritos_utm) <- st_geometry(mapa_distritos_utm) / 1000
+# Mapa de distritos en km (mismo CRS que coords_matriz)
+mapa_distritos_km <- st_transform(
+  st_read(here("data", "raw", "geometrias", "madrid_distritos.geojson"), quiet = TRUE),
+  25830
+)
+st_geometry(mapa_distritos_km) <- st_geometry(mapa_distritos_km) / 1000
 
-# 3. Preparar los puntos de las estaciones en formato data.frame (en km)
+# Estaciones como data.frame en km
 coords_df <- as.data.frame(coords_matriz)
 colnames(coords_df) <- c("X", "Y")
+coords_df$ESTACION <- coords_estaciones$ESTACION
 
-# 4. Crear una función base de ggplot para no repetir código
-crear_mapa_malla <- function(malla_input, titulo_malla) {
+# Paleta y etiquetas compartidas
+pal_leyenda <- c(
+  "Estaci\u00f3n NO\u2082" = "#d73027",
+  "Malla SPDE"             = "#2166ac",
+  "Distritos de Madrid"    = "gray50"
+)
+
+# Función reutilizable: una malla + estaciones superpuestas + leyenda
+crear_mapa_malla <- function(malla, titulo, subtitulo = NULL) {
+
+  # Datos vacíos para registrar "Malla SPDE" en la leyenda (geom_fm no lo hace)
+  df_dummy <- data.frame(x = NA_real_, y = NA_real_)
+
   ggplot() +
-    # Capa 1: Los distritos de Madrid de fondo (sin relleno, solo el borde)
-    geom_sf(data = mapa_distritos_utm, fill = NA, color = "gray40", linewidth = 0.5) +
-    
-    # Capa 2: La malla de triángulos de INLA que le pasemos
-    geom_fm(data = malla_input, color = "blue", linewidth = 0.2, alpha = 0.4) +
-    
-    # Capa 3: Tus estaciones de contaminación en rojo
-    geom_point(data = coords_df, aes(x = X, y = Y), color = "red", size = 2) +
-    
-    labs(
-      title = titulo_malla,
-      subtitle = "UTM Zona 30N (km)",
-      x = "", y = "" # Quitamos texto de ejes para que quede más limpio al juntarlos
+    geom_sf(data = mapa_distritos_km, fill = NA,
+            aes(color = "Distritos de Madrid"), linewidth = 0.4) +
+    # geom_fm no registra aes(color) en la escala -> color fijo
+    geom_fm(data = malla, color = "#2166ac", linewidth = 0.2, alpha = 0.45) +
+    # Capa invisible que crea la entrada de la malla en la leyenda
+    geom_line(data = df_dummy, aes(x = x, y = y, color = "Malla SPDE")) +
+    geom_point(data = coords_df, aes(x = X, y = Y,
+               color = "Estaci\u00f3n NO\u2082"),
+               shape = 17, size = 2.5) +
+    scale_color_manual(name = NULL, values = pal_leyenda) +
+    guides(
+      color = guide_legend(
+        override.aes = list(
+          shape     = c(NA,   17,   NA),
+          linetype  = c(1,    0,    1),
+          linewidth = c(0.6,  0,    0.6),
+          size      = c(NA,   2.5,  NA)
+        )
+      )
     ) +
-    theme_minimal() +
+    labs(
+      title    = titulo,
+      subtitle = subtitulo %||% sprintf("%d v\u00e9rtices | UTM 30N (km)", malla$n),
+      x = NULL, y = NULL
+    ) +
+    theme_minimal(base_size = 11) +
     theme(
-      panel.background = element_rect(fill = "white", colour = "lightgrey"),
-      plot.title = element_text(face = "bold", size = 12)
+      panel.background = element_rect(fill = "white", color = "gray85"),
+      plot.title       = element_text(face = "bold", size = 12),
+      plot.subtitle    = element_text(color = "gray40", size = 9),
+      axis.text        = element_text(size = 7, color = "gray50"),
+      legend.position  = "bottom",
+      legend.text      = element_text(size = 9)
     )
 }
 
-# 5. Generar los tres gráficos usando la función
-grafico_gruesa <- crear_mapa_malla(malla_gruesa, "Malla Gruesa (4 km)")
-grafico_media  <- crear_mapa_malla(malla_media, "Malla Media (2 km) - ACTUAL")
-grafico_fina   <- crear_mapa_malla(malla_fina, "Malla Fina (1 km)")
+# Operador nulo-coalescencia (disponible en R ≥ 4.4, pero lo definimos por si acaso)
+`%||%` <- function(a, b) if (!is.null(a)) a else b
 
-# 6. Guardar el súper mapa comparativo combinando los tres
-pdf(here("output", "figures", "comparacion_mallas_madrid.pdf"), width = 15, height = 5)
-grid.arrange(grafico_gruesa, grafico_media, grafico_fina, ncol = 3)
-dev.off()
+mapa_gruesa <- crear_mapa_malla(malla_gruesa, "Malla Gruesa  (max.edge = 8 km)")
+mapa_media  <- crear_mapa_malla(malla_media,  "Malla Media   (max.edge = 4 km)")
+mapa_fina   <- crear_mapa_malla(malla_fina,   "Malla Fina    (max.edge = 1 km)")
 
-# También lo puedes imprimir en la pestaña de Plots de RStudio para verlo ahora mismo:
-grid.arrange(grafico_gruesa, grafico_media, grafico_fina, ncol = 3)
+# Guardar cada malla individualmente
+ggsave(file.path(carpeta_figuras_mallas, "malla_gruesa.png"),
+       mapa_gruesa, width = 7, height = 6, dpi = 200, bg = "white")
+ggsave(file.path(carpeta_figuras_mallas, "malla_media.png"),
+       mapa_media,  width = 7, height = 6, dpi = 200, bg = "white")
+ggsave(file.path(carpeta_figuras_mallas, "malla_fina.png"),
+       mapa_fina,   width = 7, height = 6, dpi = 200, bg = "white")
+
+# Guardar mapa comparativo (3 paneles)
+comparacion <- arrangeGrob(mapa_gruesa, mapa_media, mapa_fina, ncol = 3)
+ggsave(file.path(carpeta_figuras_mallas, "comparacion_mallas.png"),
+       comparacion, width = 18, height = 6, dpi = 200, bg = "white")
+
+cat("Mapas guardados en:", carpeta_figuras_mallas, "\n")
+grid.arrange(mapa_gruesa, mapa_media, mapa_fina, ncol = 3)
 

@@ -160,7 +160,7 @@ library(data.table)
 
 # Función para agregar datos horarios a diarios con control de NAs
 agregar_a_diario <- function(dt, col_grupo = "ESTACION", col_fecha = "FECHA", col_valor = "DATO",
-                             col_longitud = "LONGITUD", col_latitud = "LATITUD", umbral_na = 0.2) {
+                             col_longitud = "LONGITUD", col_latitud = "LATITUD", umbral_na = 0.3) {
   
   dt <- as.data.table(dt)
   
@@ -184,7 +184,7 @@ agregar_a_diario <- function(dt, col_grupo = "ESTACION", col_fecha = "FECHA", co
 #------------------- Function to daily to monthly with NA control --------------
 #-------------------------------------------------------------------------------
 agregar_a_mensual<- function(dt, col_grupo = "ESTACION", col_fecha = "FECHA", col_valor = "DATO",
-                             col_longitud = "LONGITUD", col_latitud = "LATITUD", umbral_na = 0.2) {
+                             col_longitud = "LONGITUD", col_latitud = "LATITUD", umbral_na = 0.3) {
   
   dt <- as.data.table(dt)
   
@@ -556,7 +556,7 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
                                        cols_clima = cols_clima,
                                        maxgap     = 3L)
   
-  # 3. Aggregation to daily scale (threshold 20% NA)
+  # 3. Aggregation to daily scale (threshold 30% NA)
   # Source: datos_horarios (already filtered and with NAs resolved at hourly scale)
   cat("⏳ Agregando a escala diaria...\n")
   by_diario  <- c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km", "FECHA")
@@ -567,10 +567,10 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
   # and the daily sum for precipitation,
   dt_media <- if (length(cols_media) > 0) {
     datos_horarios[, lapply(.SD, function(x) {
-      # For each variable, if the proportion of NAs is greater than or equal to 20%,
+      # For each variable, if the proportion of NAs is greater than or equal to 30%,
       # we return NA for the daily mean. Otherwise, we calculate the mean of the available values, 
       # ignoring NAs.
-      if (sum(is.na(x)) / .N >= 0.2) NA_real_ else mean(x, na.rm = TRUE)
+      if (sum(is.na(x)) / .N >= 0.3) NA_real_ else mean(x, na.rm = TRUE)
     }), by = by_diario, .SDcols = cols_media]
   } else {
     unique(datos_horarios[, ..by_diario])
@@ -579,8 +579,8 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
   # We calculate the daily sum for precipitation, following the same logic as for the mean.
   datos_diarios <- if (length(cols_suma) > 0) {
     dt_suma <- datos_horarios[, lapply(.SD, function(x) {
-      # For each variable, if the proportion of NAs is greater than or equal to 20%,
-      if (sum(is.na(x)) / .N >= 0.2) NA_real_ else sum(x, na.rm = TRUE)
+      # For each variable, if the proportion of NAs is greater than or equal to 30%,
+      if (sum(is.na(x)) / .N >= 0.3) NA_real_ else sum(x, na.rm = TRUE)
     }), by = by_diario, .SDcols = cols_suma]
     # We merge the daily mean and daily sum tables by the grouping columns (station, coordinates, date).
     merge(dt_media, dt_suma, by = by_diario)
@@ -612,7 +612,7 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
       col_fecha    = "FECHA",
       cols_grupo   = cols_grupo_m,
       cols_valores = cols_media,
-      umbral_na    = 0.2,
+      umbral_na    = 0.3,
       fun_agr      = mean
     )
   } else NULL
@@ -624,7 +624,7 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
       col_fecha    = "FECHA",
       cols_grupo   = cols_grupo_m,
       cols_valores = cols_suma,
-      umbral_na    = 0.2,
+      umbral_na    = 0.3,
       fun_agr      = sum
     )
     # We merge the monthly mean and monthly sum tables by the grouping columns (station, coordinates, month).
@@ -821,7 +821,7 @@ limpiar_trafico_espacial_horario <- function(dt, dt_ubicaciones, mapa_distritos,
 #   col_fecha    – nombre de la columna de fecha (Date o POSIXct)
 #   cols_grupo   – vector de columnas de agrupación (ej. c("ESTACION","LONGITUD","LATITUD"))
 #   cols_valores – vector de columnas numéricas a agregar
-#   umbral_na    – proporción máxima de NAs permitida antes de devolver NA (default 0.2)
+#   umbral_na    – proporción máxima de NAs permitida antes de devolver NA (default 0.3)
 #   fun_agr      – función de agregación aplicada a cada columna (default mean)
 #
 # Devuelve un data.table con una fila por grupo × período.
@@ -831,7 +831,7 @@ convertir_resolucion <- function(dt,
                                  col_fecha    = "FECHA",
                                  cols_grupo   = "ESTACION",
                                  cols_valores = NULL,
-                                 umbral_na    = 0.2,
+                                 umbral_na    = 0.3,
                                  fun_agr      = mean) {
   
   a  <- match.arg(a)
@@ -916,7 +916,7 @@ agregar_trafico_diario <- function(dt_horario) {
 
 agregar_trafico_mensual <- function(dt_diario_distrito,
                                     dt_diario_barrio  = NULL, # This argument is optional. 
-                                    umbral_na         = 0.2) {
+                                    umbral_na         = 0.3) {
   
   vars_trafico <- c("intensidad", "ocupacion", "carga")
   
