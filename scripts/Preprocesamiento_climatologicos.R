@@ -13,7 +13,7 @@ source(here("R", "cleaning_functions.R"))
 # Years to be processed
 # ==============================================================================
 
-anios_procesar <- c(2022, 2025)
+anios_procesar <- c(2019)
 
 
 
@@ -76,7 +76,7 @@ if (length(anios_ok) == 0) {
 }
 
 
-horario_2025<-readRDS(here("data", "processed","Clima","diario","meteo_madrid_2022_diario.rds"))
+horario_2025<-readRDS(here("data", "processed","Clima","diario","meteo_madrid_2019_diario.rds"))
 view(horario_2025)
 #===============================================================================
 

@@ -18,33 +18,41 @@ set.seed(7291)
 carpeta_sim <- here("outputs", "simulacion")
 dir.create(carpeta_sim, showWarnings = FALSE, recursive = TRUE)
 
+
 # ==============================================================================
-# 1. CARGA DE DATOS Y SELECCIÓN DE 19 DÍAS
+# 1. CARGA DE DATOS Y SELECCIÓN DE 19 DÍAS CONSECUTIVOS DE NOVIEMBRE
 # ==============================================================================
 
 dt_maestro <- readRDS(here("data", "processed",
                            "dataset_maestro_inla_2025_DIARIO.rds"))
 setDT(dt_maestro)
+View()
 
-# Seleccionar 19 días representativos: variedad de meses y tipos de día
 fechas_disponibles <- sort(unique(dt_maestro$FECHA))
 
-# Elegimos días espaciados a lo largo del año
-indices_dias <- round(seq(1, length(fechas_disponibles), length.out = 19))
-fechas_sim   <- fechas_disponibles[indices_dias]
+# Filtrar solo las fechas que corresponden a noviembre (mes "11")
+fechas_noviembre <- fechas_disponibles[format(fechas_disponibles, "%m") == "11"]
 
-cat("Días seleccionados para la simulación:\n")
+# Verificar que haya al menos 19 días en noviembre
+if(length(fechas_noviembre) < 19) {
+  stop("No hay suficientes días en noviembre en tu dataset.")
+}
+
+# Seleccionar los primeros 19 días consecutivos de noviembre
+fechas_sim <- fechas_noviembre[1:19]
+
+cat("Días consecutivos seleccionados para la simulación:\n")
 print(data.table(
-  idx       = seq_along(fechas_sim),
-  fecha     = fechas_sim,
-  dia_sem   = weekdays(fechas_sim),
-  conjunto  = ifelse(seq_along(fechas_sim) <= 15, "TRAIN", "TEST")
+  idx        = seq_along(fechas_sim),
+  fecha      = fechas_sim,
+  dia_sem    = weekdays(fechas_sim),
+  conjunto   = ifelse(seq_along(fechas_sim) <= 15, "TRAIN", "TEST") # Wong usa 14 y 5, pero 15 y 4 está bien.
 ))
 
 fechas_train <- fechas_sim[1:15]
 fechas_test  <- fechas_sim[16:19]
 
-# Filtrar y reindexar
+# Filtrar y reindexar (el ID_TIEMPO_SIM debe ir del 1 al 19 secuencialmente)
 dt_sim <- dt_maestro[FECHA %in% fechas_sim]
 dt_sim[, ID_TIEMPO_SIM := match(FECHA, fechas_sim)]
 setorder(dt_sim, ID_TIEMPO_SIM, ESTACION)
@@ -55,7 +63,6 @@ ndays   <- 19L
 
 cat(sprintf("\nFilas totales: %d | Estaciones: %d | Días: %d (train=%d, test=%d)\n",
             nrow(dt_sim), uniqueN(dt_sim$ESTACION), ndays, n_train, n_test))
-
 # ==============================================================================
 # 2. COORDENADAS UTM (km) Y BOUNDARIES
 # ==============================================================================
@@ -95,7 +102,9 @@ covariables <- list(
   humedad             = dt_sim$Humedad_Relativa,
   precipitacion       = dt_sim$Precipitaciones,
   presion_barometrica = dt_sim$`Presion Barométrica`,
-  radiacion_solar     = dt_sim$`Radiación Solar`
+  radiacion_solar     = dt_sim$`Radiación Solar`,
+  velocidad_viento    = dt_sim$`Velocidad Viento`
+
 )
 
 # Índices de las filas de test para extraer predicciones
@@ -117,7 +126,7 @@ config_mallas <- list(
 # ==============================================================================
 
 efectos_fijos <- y ~ 0 + intercept +
-  trafico_intensidad + temperatura + precipitacion
+  trafico_intensidad + temperatura + precipitacion + velocidad_viento
 
 formula_st <- update(efectos_fijos,
   . ~ . + f(campo_espacial,
@@ -347,7 +356,7 @@ ggplot(tabla_comparativa, aes(x = Malla, y = RMSE, fill = Modelo)) +
 ggsave(file.path(carpeta_sim, "comparacion_rmse_malla_modelo.png"),
        width = 10, height = 6, dpi = 300)
 
-# Gráfico de tiempo de cómputo
+  # Gráfico de tiempo de cómputo
 ggplot(tabla_comparativa, aes(x = Malla, y = Tiempo_min, fill = Modelo)) +
   geom_col(position = position_dodge(width = 0.7), width = 0.6) +
   geom_text(aes(label = paste0(Tiempo_min, " min")),
@@ -368,3 +377,4 @@ ggsave(file.path(carpeta_sim, "comparacion_tiempo_malla_modelo.png"),
        width = 10, height = 6, dpi = 300)
 
 cat("\n✅ Simulación completada. Resultados en:", carpeta_sim, "\n")
+

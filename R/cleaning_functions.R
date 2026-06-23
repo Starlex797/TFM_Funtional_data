@@ -670,7 +670,7 @@ limpiar_trafico_espacial_horario <- function(dt, dt_ubicaciones, mapa_distritos,
   dt_work[, FECHA := as.Date(fecha_hora)] 
   
   # 2. We only keep these variables 
-  cols_medidas <- c("intensidad", "ocupacion", "carga")
+  cols_medidas <- c("intensidad", "carga")
   
   # 2b. We set to NA the measurements that have error codes "E" (error) or "S" (suspect),
   # as well as any negative values which are not physically meaningful for these variables.
@@ -745,13 +745,12 @@ limpiar_trafico_espacial_horario <- function(dt, dt_ubicaciones, mapa_distritos,
   # of missing data and the impact of the imputation process.
   
   cat("Conteo de valores NA",sum(is.na(dt_work$intensidad)), "en intensidad,",
-      sum(is.na(dt_work$ocupacion)), "en ocupación y",
       sum(is.na(dt_work$carga)), "en carga.\n")
   
   # Tally the total number of NAs across all three variables to determine if we need to perform 
   # imputation. If there are no NAs, we can skip the imputation step entirely.
   
-  total_nas <- sum(is.na(dt_work$intensidad)) + sum(is.na(dt_work$ocupacion)) + sum(is.na(dt_work$carga))
+  total_nas <- sum(is.na(dt_work$intensidad)) + sum(is.na(dt_work$carga))
   
   if (total_nas > 0) {
     
@@ -803,7 +802,7 @@ limpiar_trafico_espacial_horario <- function(dt, dt_ubicaciones, mapa_distritos,
   # and the traffic variables (intensidad, ocupacion, carga).
   
   cols_output <- c("fecha_hora", "FECHA", "id", "utm_x", "utm_y",
-                   "distrito", "barrio", "intensidad", "ocupacion", "carga")
+                   "distrito", "barrio", "intensidad", "carga")
   dt_horario <- dt_work[, ..cols_output]
   
   return(dt_horario)
@@ -888,7 +887,6 @@ agregar_trafico_diario <- function(dt_horario) {
   
   dt_diario_distrito <- dt[, .(
     intensidad    = mean(intensidad, na.rm = TRUE),
-    ocupacion     = mean(ocupacion,  na.rm = TRUE),
     carga         = mean(carga,      na.rm = TRUE),
     num_medidores = uniqueN(id)
   ), by = .(distrito, FECHA)]
@@ -898,7 +896,6 @@ agregar_trafico_diario <- function(dt_horario) {
   
   dt_diario_barrio <- dt[!is.na(barrio) & barrio != "", .(
     intensidad    = mean(intensidad, na.rm = TRUE),
-    ocupacion     = mean(ocupacion,  na.rm = TRUE),
     carga         = mean(carga,      na.rm = TRUE),
     num_medidores = uniqueN(id)
   ), by = .(distrito, barrio, FECHA)]
@@ -918,7 +915,7 @@ agregar_trafico_mensual <- function(dt_diario_distrito,
                                     dt_diario_barrio  = NULL, # This argument is optional. 
                                     umbral_na         = 0.3) {
   
-  vars_trafico <- c("intensidad", "ocupacion", "carga")
+  vars_trafico <- c("intensidad", "carga")
   
   agregar_un_nivel <- function(dt, cols_grupo) {
     dt <- as.data.table(dt)
@@ -971,7 +968,6 @@ agregar_trafico_horario_zona <- function(dt_horario) {
   # Aggregation by district × date × hour
   dt_hora_distrito <- dt[, .(
     intensidad    = mean(intensidad, na.rm = TRUE),
-    ocupacion     = mean(ocupacion,  na.rm = TRUE),
     carga         = mean(carga,      na.rm = TRUE),
     num_medidores = uniqueN(id)
   ), by = .(distrito, FECHA, HORA)]
@@ -980,7 +976,6 @@ agregar_trafico_horario_zona <- function(dt_horario) {
   # Aggregation by neighborhood (barrio) within each district × date × hour
   dt_hora_barrio <- dt[!is.na(barrio) & barrio != "", .(
     intensidad    = mean(intensidad, na.rm = TRUE),
-    ocupacion     = mean(ocupacion,  na.rm = TRUE),
     carga         = mean(carga,      na.rm = TRUE),
     num_medidores = uniqueN(id)
   ), by = .(distrito, barrio, FECHA, HORA)]

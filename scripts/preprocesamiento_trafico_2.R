@@ -2,6 +2,7 @@
 library(data.table)
 library(sf)
 library(here)
+here::i_am("scripts/preprocesamiento_trafico_2.R")
 source(here("R", "cleaning_functions.R"))
 
 # --- Global Parameetrs ---
@@ -10,7 +11,7 @@ source(here("R", "cleaning_functions.R"))
 # Global Parameter in order to process the traffic data of Madrid for the year
 # Traffic data is only available for the whole year, but I had to download it month by month
 #===============================================================================
-anio <- 2025 # Year of the traffic data to process
+anio <- 2020 # Year of the traffic data to process
 meses <- c("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
 
@@ -92,9 +93,14 @@ for (mes in meses) {
   cat("\n--------------------------------------------------\n")
   cat("Procesando MES:", mes, "\n")
 
-  ruta_trafico_mes <- here("data", "raw", "Datos_trafico", "Datos_trafico_2025",
-                           paste0(mes, "_2025"), paste0(mes, "_2025.csv"))
-  ruta_ubica_mes   <- here("data", "raw", "Datos_trafico", "Detectores_2025", paste0(mes, ".csv"))
+  ruta_trafico_mes <- here("data", "raw", "Datos_trafico", 
+                           paste0("Datos_trafico_", anio),
+                           paste0(mes, "_", anio), 
+                           paste0(mes, "_", anio, ".csv"))
+  
+  ruta_ubica_mes <- here("data", "raw", "Datos_trafico", 
+                         paste0("Detectores_", anio), 
+                         paste0(mes, ".csv"))
 
   # Check if both files exist before processing
   if (file.exists(ruta_trafico_mes) & file.exists(ruta_ubica_mes)) {
@@ -153,8 +159,8 @@ for (mes in meses) {
 cat("\n==================================================\n")
 cat("INICIANDO ...\n")
 
-carpeta_salida_distrito<- here("data", "raw", "Datos_trafico", "Datos_limpios_2025", "Diario_Distrito")
-carpeta_salida_barrio<- here("data", "raw", "Datos_trafico", "Datos_limpios_2025", "Diario_Barrio")
+carpeta_salida_distrito <- file.path(carpeta_base, "Diario_Distrito")
+carpeta_salida_barrio   <- file.path(carpeta_base, "Diario_Barrio")
 # 1.Define the route 
 configuraciones <- list(
 
@@ -228,9 +234,6 @@ for (conf in configuraciones) {
 
 cat("\nPREPROCESAMIENTO FINALIZADO.\n")
 
-
-hola<- readRDS(here("data", "processed","trafico_madrid_2025_horario_barrio.rds"))
-View(hola)
 # ==============================================================================
 # 4. Generate a map of the sensor network for visual inspection
 # ==============================================================================
@@ -241,7 +244,7 @@ library(here)
 
 cat("\nGenerando cartografía de la red de sensores...\n")
 
-ruta_ubica_mes   <- here("data", "raw", "Datos_trafico", "Detectores_2025", "Enero.csv")
+ruta_ubica_mes   <- here("data", "raw", "Datos_trafico", paste0("Detectores_", anio), "Enero.csv")
 dt_ubi <- fread(ruta_ubica_mes,   sep = ";")
 # 1. Create the output folder for figures if it doesn't exist
 carpeta_figuras <- here("output", "figures")
@@ -282,7 +285,7 @@ mapa_sensores <- ggplot() +
 print(mapa_sensores)
 
 # 4. Save the map to a PNG. 
-ruta_guardado_mapa <- file.path(carpeta_figuras, "mapa_distribucion_sensores.png")
+ruta_guardado_mapa <- file.path(carpeta_figuras, "mapa_distribucion_sensores",anio,".png")
 
 ggsave(filename = ruta_guardado_mapa, 
        plot   = mapa_sensores, 

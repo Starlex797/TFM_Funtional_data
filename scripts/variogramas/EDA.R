@@ -327,144 +327,6 @@ plot_perfil_horario <- ggplot(dt_hora_resumen,
 print(plot_perfil_horario)
 
 
-# ===============================================================================
-# Correlation between stations for each climate variable, No2 and traffic variables
-# ==============================================================================
-# HOMOGENEIDAD ESPACIAL — CORRELACIONES TEMPORALES ENTRE ESTACIONES
-# ==============================================================================
-# Para cada variable climática, pivoteamos a formato ancho (una columna por
-# estación) y calculamos la correlación de Pearson entre todos los pares usando
-# la serie horaria completa.
-#
-# Interpretación:
-#   r ≈ 1  → campo espacialmente homogéneo → basta con la media de la ciudad.
-#   r < 0.7 → heterogeneidad espacial real → se necesita interpolación (IDW/kriging).
-#
-# Se calcula para 2022 y 2025 para verificar estabilidad interanual.
-# ==============================================================================
-
-# ── Función auxiliar: correlaciones por pares para un año ────────────────────
-calcular_cor_pares <- function(dt_horario, vars, anio_label) {
-  resultados <- list()
-  for (v in vars) {
-    est_mide <- dt_horario[, .(pct_na = sum(is.na(get(v))) / .N),
-                           by = ESTACION][pct_na < 1, ESTACION]
-    sub <- dt_horario[ESTACION %in% est_mide,
-                      c("ESTACION", "FECHA", "HORA", v), with = FALSE]
-    wide <- data.table::dcast(sub, FECHA + HORA ~ ESTACION, value.var = v)
-    est_cols <- setdiff(names(wide), c("FECHA", "HORA"))
-    mat <- as.matrix(wide[, .SD, .SDcols = est_cols])
-    cor_mat <- cor(mat, use = "pairwise.complete.obs")
-    lower <- cor_mat[lower.tri(cor_mat)]
-
-    resultados[[v]] <- list(
-      mat    = cor_mat,
-      median = median(lower, na.rm = TRUE),
-      min    = min(lower, na.rm = TRUE),
-      max    = max(lower, na.rm = TRUE),
-      q25    = quantile(lower, 0.25, na.rm = TRUE),
-      n_est  = length(est_cols),
-      anio   = anio_label
-    )
-  }
-  resultados
-}
-
-# ── Cargar datos horarios post-imputación ────────────────────────────────────
-dt_h_2022 <- readRDS(here("data", "processed", "Clima", "horario",
-                           "meteo_madrid_2022_horario.rds"))
-dt_h_2025 <- readRDS(here("data", "processed", "Clima", "horario",
-                           "meteo_madrid_2025_horario.rds"))
-
-cor_2022 <- calcular_cor_pares(dt_h_2022, vars_clima, "2022")
-cor_2025 <- calcular_cor_pares(dt_h_2025, vars_clima, "2025")
-
-# ── Tabla comparativa 2022 vs 2025 ──────────────────────────────────────────
-tabla_homogeneidad <- data.table(
-  Variable = vars_clima,
-  r_2022   = sapply(vars_clima, \(v) round(cor_2022[[v]]$median, 3)),
-  r_2025   = sapply(vars_clima, \(v) round(cor_2025[[v]]$median, 3)),
-  n_2022   = sapply(vars_clima, \(v) cor_2022[[v]]$n_est),
-  n_2025   = sapply(vars_clima, \(v) cor_2025[[v]]$n_est)
-)
-tabla_homogeneidad[, Decision := fifelse(
-  pmin(r_2022, r_2025) >= 0.9, "Media ciudad",
-  fifelse(pmin(r_2022, r_2025) >= 0.7, "Media o interpolar", "Interpolar (IDW)")
-)]
-setorder(tabla_homogeneidad, -r_2025)
-
-cat("\n=== HOMOGENEIDAD ESPACIAL — Correlación temporal mediana entre estaciones ===\n")
-print(tabla_homogeneidad, row.names = FALSE)
-
-# ── Gráfico resumen (barras + rango) — 2025 ─────────────────────────────────
-resumen_2025 <- data.table(
-  Variable  = vars_clima,
-  Mediana_r = sapply(vars_clima, \(v) cor_2025[[v]]$median),
-  Min_r     = sapply(vars_clima, \(v) cor_2025[[v]]$min),
-  Max_r     = sapply(vars_clima, \(v) cor_2025[[v]]$max),
-  N_est     = sapply(vars_clima, \(v) cor_2025[[v]]$n_est)
-)
-resumen_2025[, Decision := fifelse(Mediana_r >= 0.9, "Media ciudad",
-                            fifelse(Mediana_r >= 0.7, "Media o interpolar",
-                                    "Interpolar (IDW)"))]
-
-plot_homogeneidad_resumen <- ggplot(resumen_2025,
-    aes(x = Mediana_r, y = reorder(Variable, Mediana_r), fill = Decision)) +
-  geom_col(width = 0.7) +
-  geom_errorbar(aes(xmin = Min_r, xmax = Max_r),
-                width = 0.25, color = "gray30", orientation = "y") +
-  geom_text(aes(label = sprintf("%.3f", Mediana_r)),
-            hjust = -0.3, size = 3.5, fontface = "bold") +
-  scale_fill_manual(values = c("Media ciudad"       = "#27ae60",
-                                "Media o interpolar" = "#f39c12",
-                                "Interpolar (IDW)"   = "#e74c3c")) +
-  scale_x_continuous(limits = c(0, 1.08), breaks = seq(0, 1, 0.2)) +
-  geom_vline(xintercept = 0.9, linetype = "dashed", color = "gray50") +
-  labs(title    = "Homogeneidad espacial de variables climatológicas",
-       subtitle = "Correlación temporal entre pares de estaciones · Madrid 2025 (horario)",
-       x        = "Correlación mediana (r)",
-       caption  = "Barras de error: rango [mín, máx] · Línea punteada: umbral r = 0.9") +
-  theme_minimal(base_size = 11) +
-  theme(axis.title.y    = element_blank(),
-        plot.title      = element_text(face = "bold"),
-        legend.position = "bottom",
-        legend.title    = element_blank())
-
-print(plot_homogeneidad_resumen) # Esto está mal, no me puedo fiar de lo que hay aqui
-# El problema es que hago la media y justo las precipitaciones y la velocidad del viento 
-# SOn las dos únicas que no puedo hacer la media. 
-
-# ── Heatmaps por variable (2025) ────────────────────────────────────────────
-plots_heatmaps <- list()
-
-for (v in vars_clima) {
-  mat <- cor_2025[[v]]$mat
-  hc  <- hclust(as.dist(1 - mat))
-  ord <- hc$order
-  mat_ord <- mat[ord, ord]
-
-  melted <- reshape2::melt(mat_ord)
-  melted$Var1 <- factor(melted$Var1, levels = rownames(mat_ord))
-  melted$Var2 <- factor(melted$Var2, levels = colnames(mat_ord))
-
-  p <- ggplot(melted, aes(x = Var1, y = Var2, fill = value)) +
-    geom_tile(color = "white", linewidth = 0.3) +
-    geom_text(aes(label = sprintf("%.2f", value)), size = 1.8, color = "gray20") +
-    scale_fill_gradient2(low = "#3498db", mid = "#f1c40f", high = "#c0392b",
-                         midpoint = 0.7, limits = c(0, 1), name = "r") +
-    labs(title    = paste("Correlación temporal entre estaciones —", v),
-         subtitle = sprintf("n = %d estaciones · Mediana r = %.3f · Madrid 2025 (horario)",
-                            cor_2025[[v]]$n_est, cor_2025[[v]]$median)) +
-    theme_minimal(base_size = 10) +
-    theme(axis.text.x  = element_text(angle = 45, hjust = 1, size = 7),
-          axis.text.y  = element_text(size = 7),
-          axis.title   = element_blank(),
-          plot.title   = element_text(face = "bold", size = 12))
-
-  plots_heatmaps[[v]] <- p
-  print(p)
-}
-
 # ==============================================================================
 # Correlation heatmap: NO2, climate variables and traffic variables
 # ==============================================================================
@@ -472,6 +334,8 @@ for (v in vars_clima) {
 # Paso 2. Pearson correlation on raw-scale variables (result is identical to
 # standardised variables because correlation is invariant to linear transforms).
 # ==============================================================================
+
+
 
 library(reshape2)
 

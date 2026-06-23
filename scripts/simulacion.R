@@ -12,10 +12,12 @@
 # ==============================================================================
 
 library(INLA)
+library(fmesher)
 library(data.table)
 library(sf)
 library(here)
 library(ggplot2)
+library(car)
 
 set.seed(8314)
 
@@ -96,19 +98,325 @@ bnd_outer <- inla.nonconvex.hull(coords_matriz, convex = -0.2)
 y_train_test <- ifelse(dt_sim$FECHA %in% fechas_train,
                        dt_sim$LOG_NO2_DIARIO, NA_real_)
 
-covariables <- list(
+covariables_candidatas <- list(
   trafico_intensidad  = dt_sim$intensidad,
-  trafico_carga       = dt_sim$carga,
   temperatura         = dt_sim$Temperatura,
   humedad             = dt_sim$Humedad_Relativa,
   precipitacion       = dt_sim$Precipitaciones,
   presion_barometrica = dt_sim$`Presion Barométrica`,
-  radiacion_solar     = dt_sim$`Radiación Solar`
+  radiacion_solar     = dt_sim$`Radiación Solar`,
+  velocidad_viento    = dt_sim$`Velocidad Viento`
 )
+
+# ------------------------------------------------------------------------------
+# 3b. SELECCIÓN DE COVARIABLES POR VIF HACIA ATRÁS (umbral = 5)
+#     Se usa solo el conjunto de entrenamiento para evitar data leakage.
+# ------------------------------------------------------------------------------
+VIF_UMBRAL <- 5
+
+# Construir data.frame de entrenamiento con respuesta + covariables candidatas
+df_train_vif <- as.data.frame(
+  lapply(covariables_candidatas, function(x) x[dt_sim$FECHA %in% fechas_train])
+)
+df_train_vif$LOG_NO2 <- dt_sim$LOG_NO2_DIARIO[dt_sim$FECHA %in% fechas_train]
+
+# Eliminar filas con NA en cualquier columna
+df_train_vif <- na.omit(df_train_vif)
+
+vars_vif <- names(covariables_candidatas)
+
+cat("\n--- VIF hacia atrás (umbral =", VIF_UMBRAL, ") ---\n")
+
+repeat {
+  formula_vif <- as.formula(
+    paste("LOG_NO2 ~", paste(vars_vif, collapse = " + "))
+  )
+  lm_vif <- lm(formula_vif, data = df_train_vif)
+  vif_vals <- car::vif(lm_vif)
+
+  cat(sprintf("  Variables: %s\n", paste(vars_vif, collapse = ", ")))
+  cat("  VIF actuales:\n")
+  print(round(vif_vals, 3))
+
+  vif_max <- max(vif_vals)
+  if (vif_max <= VIF_UMBRAL) {
+    cat(sprintf("  → Todas las variables tienen VIF ≤ %.1f. Selección finalizada.\n",
+                VIF_UMBRAL))
+    break
+  }
+
+  var_eliminar <- names(which.max(vif_vals))
+  cat(sprintf("  → Eliminando '%s' (VIF = %.3f)\n\n", var_eliminar, vif_max))
+  vars_vif <- setdiff(vars_vif, var_eliminar)
+
+  if (length(vars_vif) < 2) {
+    warning("VIF hacia atrás dejó menos de 2 variables; se revisa el umbral.")
+    break
+  }
+}
+
+cat(sprintf("\nVariables retenidas (%d): %s\n",
+            length(vars_vif), paste(vars_vif, collapse = ", ")))
+
+# Guardar tabla resumen VIF final
+tabla_vif <- data.frame(
+  Variable = names(vif_vals),
+  VIF      = round(as.numeric(vif_vals), 4),
+  row.names = NULL
+)
+tabla_vif <- tabla_vif[order(tabla_vif$VIF, decreasing = TRUE), ]
+
+write.csv(tabla_vif,
+          file.path(carpeta_sim, "seleccion_vif_covariables.csv"),
+          row.names = FALSE)
+
+cat("Tabla VIF guardada en: seleccion_vif_covariables.csv\n")
+
+# Filtrar la lista de covariables a las retenidas por VIF
+covariables <- covariables_candidatas[vars_vif]
 
 # Índices y valores reales de las filas de test
 idx_test_filas <- which(dt_sim$FECHA %in% fechas_test)
 y_test_real    <- dt_sim$LOG_NO2_DIARIO[idx_test_filas]
+
+# ------------------------------------------------------------------------------
+# 3c. SIGNIFICANCIA BAYESIANA (IC95% excluye 0 en modelo INLA SPDE completo)
+#     Se construye una malla/SPDE de referencia (media, 4 km) compartida
+#     con el stepwise del bloque 3d.
+# ------------------------------------------------------------------------------
+
+malla_sw <- inla.mesh.2d(
+  loc      = coords_matriz,
+  boundary = list(bnd_inner, bnd_outer),
+  max.edge = c(4, 8),
+  cutoff   = 0.5
+)
+spde_sw <- inla.spde2.matern(mesh = malla_sw, alpha = 2)
+
+indice_sw <- inla.spde.make.index(
+  name    = "campo_espacial",
+  n.spde  = spde_sw$n.spde,
+  n.group = ndays
+)
+A_sw <- inla.spde.make.A(
+  mesh    = malla_sw,
+  loc     = coords_puntos,
+  group   = dt_sim$ID_TIEMPO_SIM,
+  n.group = ndays
+)
+cat(sprintf("\n[Selección] Malla de referencia: %d nodos\n", malla_sw$n))
+
+# Modelo INLA SPDE AR1 con todas las variables retenidas por VIF
+formula_full <- as.formula(paste(
+  "y ~ 0 + intercept +",
+  paste(vars_vif, collapse = " + "),
+  "+ f(campo_espacial, model = spde_sw,",
+  "    group = campo_espacial.group,",
+  "    control.group = list(model = 'ar1'))"
+))
+
+stk_full <- inla.stack(
+  tag      = "full",
+  data     = list(y = y_train_test),
+  A        = list(A_sw, 1),
+  effects  = list(
+    c(indice_sw, list(intercept = 1)),
+    covariables_candidatas[vars_vif]
+  ),
+  compress = FALSE
+)
+
+cat("  Ajustando modelo INLA completo (significancia)...\n")
+modelo_full <- inla(
+  formula           = formula_full,
+  data              = inla.stack.data(stk_full, spde = spde_sw),
+  family            = "gaussian",
+  control.predictor = list(A = inla.stack.A(stk_full), compute = TRUE),
+  control.compute   = list(dic = TRUE, waic = FALSE, cpo = FALSE),
+  control.inla      = list(strategy = "laplace"),
+  verbose           = FALSE
+)
+
+# Efectos fijos (excluir intercepto)
+sf_full <- modelo_full$summary.fixed
+sf_vars <- sf_full[rownames(sf_full) != "intercept", ]
+
+# Variable significativa ↔ IC95% no contiene el 0
+sig_mask    <- sf_vars[, "0.025quant"] > 0 | sf_vars[, "0.975quant"] < 0
+vars_sig    <- rownames(sf_vars)[ sig_mask]
+vars_no_sig <- rownames(sf_vars)[!sig_mask]
+
+tabla_sig <- data.frame(
+  Variable = rownames(sf_vars),
+  Media    = round(sf_vars$mean,            4),
+  SD       = round(sf_vars$sd,              4),
+  Q2.5     = round(sf_vars[, "0.025quant"], 4),
+  Q97.5    = round(sf_vars[, "0.975quant"], 4),
+  Sig_95   = ifelse(sig_mask, "Sí", "No"),
+  row.names = NULL
+)
+
+cat("\n--- Significancia bayesiana (IC95% excluye 0) ---\n")
+print(tabla_sig)
+cat(sprintf("\n  Significativas   (%d): %s\n", length(vars_sig),
+            paste(vars_sig,    collapse = ", ")))
+cat(sprintf("  No significativas(%d): %s\n", length(vars_no_sig),
+            paste(vars_no_sig, collapse = ", ")))
+
+write.csv(tabla_sig,
+          file.path(carpeta_sim, "significancia_bayesiana_covariables.csv"),
+          row.names = FALSE)
+
+# ------------------------------------------------------------------------------
+# 3d. STEPWISE BASADO EN DIC (INLA SPDE AR1, misma malla de referencia)
+#     Punto de partida : variables significativas (vars_sig)
+#     Pool completo    : variables retenidas por VIF (vars_vif)
+#     Criterio de parada: mejora en DIC < DIC_MEJORA_MIN
+# ------------------------------------------------------------------------------
+
+DIC_MEJORA_MIN <- 2
+
+# Helper: ajusta INLA SPDE AR1 para un subconjunto de variables;
+# devuelve DIC, RMSE y MAE sobre los días de test.
+# Usa spde_sw, indice_sw, A_sw del entorno global.
+ajustar_sw <- function(vars_modelo) {
+  formula_sw <- as.formula(paste(
+    "y ~ 0 + intercept +",
+    paste(vars_modelo, collapse = " + "),
+    "+ f(campo_espacial, model = spde_sw,",
+    "    group = campo_espacial.group,",
+    "    control.group = list(model = 'ar1'))"
+  ))
+
+  stk_sw <- inla.stack(
+    tag      = "sw",
+    data     = list(y = y_train_test),
+    A        = list(A_sw, 1),
+    effects  = list(
+      c(indice_sw, list(intercept = 1)),
+      covariables_candidatas[vars_modelo]
+    ),
+    compress = FALSE
+  )
+
+  mod <- tryCatch(
+    inla(
+      formula           = formula_sw,
+      data              = inla.stack.data(stk_sw, spde = spde_sw),
+      family            = "gaussian",
+      control.predictor = list(A = inla.stack.A(stk_sw), compute = TRUE),
+      control.compute   = list(dic = TRUE, waic = FALSE, cpo = FALSE),
+      control.inla      = list(strategy = "laplace"),
+      verbose           = FALSE
+    ),
+    error = function(e) { message("  ERROR ajustar_sw: ", e$message); NULL }
+  )
+
+  if (is.null(mod)) return(list(DIC = Inf, RMSE = NA_real_, MAE = NA_real_))
+
+  idx_data  <- inla.stack.index(stk_sw, tag = "sw")$data
+  pred_test <- mod$summary.fitted.values$mean[idx_data][idx_test_filas]
+  rmse <- sqrt(mean((pred_test - y_test_real)^2, na.rm = TRUE))
+  mae  <- mean(abs(pred_test  - y_test_real),    na.rm = TRUE)
+
+  list(DIC = mod$dic$dic, RMSE = rmse, MAE = mae)
+}
+
+# ---- Bucle stepwise bidireccional ----
+vars_actuales <- if (length(vars_sig) > 0) vars_sig else vars_vif
+tabla_sw      <- list()
+
+cat(sprintf("\n--- Stepwise DIC (ΔDIC mín. = %g) ---\n", DIC_MEJORA_MIN))
+
+res_actual <- ajustar_sw(vars_actuales)
+cat(sprintf("Modelo inicial : %s\n  DIC=%.2f | RMSE=%.4f | MAE=%.4f\n",
+            paste(vars_actuales, collapse = " + "),
+            res_actual$DIC, res_actual$RMSE, res_actual$MAE))
+
+tabla_sw[[1]] <- data.frame(
+  Iteracion = 0L, Accion = "inicial", Variable = NA_character_,
+  Variables = paste(vars_actuales, collapse = " + "),
+  DIC  = round(res_actual$DIC,  2),
+  RMSE = round(res_actual$RMSE, 4),
+  MAE  = round(res_actual$MAE,  4),
+  stringsAsFactors = FALSE
+)
+
+for (iter in seq_len(length(vars_vif))) {
+
+  cat(sprintf("\n[Iter %d] Actual: %s  (DIC=%.2f)\n",
+              iter, paste(vars_actuales, collapse = " + "), res_actual$DIC))
+
+  cands <- data.frame(accion = character(), variable = character(),
+                      DIC = numeric(), RMSE = numeric(), MAE = numeric(),
+                      stringsAsFactors = FALSE)
+
+  # Probar añadir cada variable del pool no incluida aún
+  for (v in setdiff(vars_vif, vars_actuales)) {
+    r <- ajustar_sw(c(vars_actuales, v))
+    cat(sprintf("  + %-22s DIC=%8.2f  RMSE=%.4f  MAE=%.4f\n",
+                v, r$DIC, r$RMSE, r$MAE))
+    cands <- rbind(cands, data.frame(accion = "añadir",   variable = v,
+                                     DIC = r$DIC, RMSE = r$RMSE, MAE = r$MAE,
+                                     stringsAsFactors = FALSE))
+  }
+
+  # Probar eliminar cada variable activa (mínimo 1 variable en el modelo)
+  if (length(vars_actuales) >= 2) {
+    for (v in vars_actuales) {
+      r <- ajustar_sw(setdiff(vars_actuales, v))
+      cat(sprintf("  - %-22s DIC=%8.2f  RMSE=%.4f  MAE=%.4f\n",
+                  v, r$DIC, r$RMSE, r$MAE))
+      cands <- rbind(cands, data.frame(accion = "eliminar", variable = v,
+                                       DIC = r$DIC, RMSE = r$RMSE, MAE = r$MAE,
+                                       stringsAsFactors = FALSE))
+    }
+  }
+
+  mejor  <- cands[which.min(cands$DIC), ]
+  mejora <- res_actual$DIC - mejor$DIC
+
+  if (mejora < DIC_MEJORA_MIN) {
+    cat(sprintf("  → Sin mejora suficiente (ΔDIC=%.2f). Stepwise convergido.\n",
+                mejora))
+    break
+  }
+
+  vars_actuales <- if (mejor$accion == "añadir")
+    c(vars_actuales, mejor$variable) else setdiff(vars_actuales, mejor$variable)
+
+  res_actual <- list(DIC = mejor$DIC, RMSE = mejor$RMSE, MAE = mejor$MAE)
+
+  cat(sprintf("  → %s '%s'  ΔDIC=%.2f | RMSE=%.4f | MAE=%.4f\n",
+              mejor$accion, mejor$variable, mejora, mejor$RMSE, mejor$MAE))
+
+  tabla_sw[[iter + 1]] <- data.frame(
+    Iteracion = iter,
+    Accion    = mejor$accion,
+    Variable  = mejor$variable,
+    Variables = paste(vars_actuales, collapse = " + "),
+    DIC  = round(mejor$DIC,  2),
+    RMSE = round(mejor$RMSE, 4),
+    MAE  = round(mejor$MAE,  4),
+    stringsAsFactors = FALSE
+  )
+}
+
+tabla_stepwise <- do.call(rbind, tabla_sw)
+
+cat(sprintf("\nVariables finales stepwise (%d): %s\n",
+            length(vars_actuales), paste(vars_actuales, collapse = ", ")))
+
+write.csv(tabla_stepwise,
+          file.path(carpeta_sim, "stepwise_dic_covariables.csv"),
+          row.names = FALSE)
+cat("Tabla stepwise guardada: stepwise_dic_covariables.csv\n")
+
+# Actualizar vars_vif y covariables con la selección final del stepwise
+vars_vif    <- vars_actuales
+covariables <- covariables_candidatas[vars_vif]
+
+rm(malla_sw, spde_sw, indice_sw, A_sw, stk_full, modelo_full)
 
 # ==============================================================================
 # 4. CONFIGURACIÓN DE LAS 3 MALLAS
@@ -124,8 +432,9 @@ config_mallas <- list(
 # 5. FÓRMULAS COMPARTIDAS (consistente con Paso 5)
 # ==============================================================================
 
-efectos_fijos <- y ~ 0 + intercept +
-  trafico_intensidad + temperatura + precipitacion
+efectos_fijos <- as.formula(
+  paste("y ~ 0 + intercept +", paste(vars_vif, collapse = " + "))
+)
 
 # Modelo espacio-temporal: campo SPDE con correlación AR1 entre días
 formula_st <- update(efectos_fijos,
