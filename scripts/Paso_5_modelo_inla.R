@@ -184,7 +184,7 @@ t0_s <- Sys.time()
 modelo_s <- inla(
   formula = formula_s,
   data    = inla.stack.data(stk_madrid_s, spde = spde),
-  family  = "gaussian ",
+  family  = "gaussian",
   control.predictor = list(A = inla.stack.A(stk_madrid_s), compute = TRUE),
   control.compute   = list(dic = TRUE, waic = TRUE, cpo = FALSE, config = TRUE),
   control.inla      = list(strategy = "laplace"),
@@ -280,7 +280,7 @@ cat("Completado en", round(as.numeric(difftime(Sys.time(), t0, units = "mins")),
 saveRDS(modelo_st2, here("data", "processed", "modelo_st2_no2_madrid.rds"))
 
 cat("\n--- Efectos fijos (espacio-temporal) ---\n")
-print(round(modelo_st$summary.fixed[, c("mean", "0.025quant", "0.975quant")], 4))
+print(round(modelo_st2$summary.fixed[, c("mean", "0.025quant", "0.975quant")], 4))
 
 # ==============================================================================
 # 5. MODELO SOLO ESPACIAL (baseline)
@@ -332,4 +332,4 @@ cat("Menor DIC/WAIC indica mejor balance entre ajuste y complejidad.\n")
 
 saveRDS(comparacion, here("data", "processed", "comparacion_modelos.rds"))
 write.csv(comparacion, here("output", "comparacion_modelos.csv"), row.names = FALSE)
-º
+

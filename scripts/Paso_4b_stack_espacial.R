@@ -77,3 +77,4 @@ cat("- Filas en el stack:", inla.stack.ndata(stk_madrid_s), "\n")
 cat("- Columnas de A_espacial_s:", ncol(A_espacial_s),
     "== nodos de la malla:", malla_madrid$n, "\n")
 cat("  (Debe ser igual; sin group no hay replicación temporal)\n")
+

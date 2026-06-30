@@ -30,6 +30,80 @@ tabla_rmse_loocv <- comparar_interpolaciones_loocv(
 )
 
 # ==============================================================================
+# TABLA Y GRÁFICO COMPARATIVO DE MÉTODOS (PNG)
+# ==============================================================================
+library(gt)
+
+dir.create(here("output", "figures", "interpolacion_clima"),
+           recursive = TRUE, showWarnings = FALSE)
+
+# --- Tabla gt como PNG ---
+tabla_display <- copy(tabla_rmse_loocv)
+tabla_display[, Mejor_Metodo := NULL]
+
+tbl <- gt(tabla_display) |>
+  tab_header(
+    title    = "Comparación de Métodos de Interpolación — LOOCV",
+    subtitle = sprintf("Fecha: %s | k vecinos = 5", format(FECHA_ANALISIS, "%d %b %Y"))
+  ) |>
+  tab_spanner(label = "RMSE", columns = starts_with("RMSE_")) |>
+  tab_spanner(label = "MAE",  columns = starts_with("MAE_")) |>
+  cols_label(
+    RMSE_Media = "Media", RMSE_NN = "1-NN", RMSE_kNN = "kNN", RMSE_IDW = "IDW",
+    MAE_Media  = "Media", MAE_NN  = "1-NN", MAE_kNN  = "kNN", MAE_IDW  = "IDW"
+  ) |>
+  tab_options(
+    table.font.size      = px(12),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(12),
+    column_labels.font.weight = "bold",
+    table.border.top.color = "black",
+    table.border.bottom.color = "black",
+    heading.border.bottom.color = "black",
+    column_labels.border.bottom.color = "black"
+  ) |>
+  opt_horizontal_padding(scale = 2)
+
+gtsave(tbl,
+       filename = here("output", "figures", "interpolacion_clima",
+                        "tabla_comparacion_metodos.png"),
+       vwidth = 1000)
+cat("Tabla comparativa guardada: tabla_comparacion_metodos.png\n")
+
+# --- Gráfico de barras RMSE por variable y método ---
+library(tidyr)
+
+df_rmse <- tabla_rmse_loocv[, .(Variable, Media = RMSE_Media, `1-NN` = RMSE_NN,
+                                 `kNN (k=5)` = RMSE_kNN, `IDW (p=2)` = RMSE_IDW)]
+df_long <- pivot_longer(df_rmse, cols = -Variable,
+                        names_to = "Metodo", values_to = "RMSE")
+df_long$Metodo <- factor(df_long$Metodo,
+                         levels = c("Media", "1-NN", "kNN (k=5)", "IDW (p=2)"))
+
+ggplot(df_long, aes(x = Variable, y = RMSE, fill = Metodo)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  geom_text(aes(label = sprintf("%.2f", RMSE)),
+            position = position_dodge(width = 0.75),
+            vjust = -0.4, size = 2.8) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title    = "RMSE por Variable y Método de Interpolación (LOOCV)",
+    subtitle = sprintf("Madrid — %s", format(FECHA_ANALISIS, "%d %b %Y")),
+    x = NULL, y = "RMSE", fill = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x  = element_text(angle = 30, hjust = 1),
+    plot.title    = element_text(face = "bold"),
+    legend.position = "top"
+  )
+
+ggsave(here("output", "figures", "interpolacion_clima",
+            "grafico_rmse_metodos.png"),
+       width = 10, height = 6, dpi = 300, bg = "white")
+cat("Gráfico RMSE comparativo guardado: grafico_rmse_metodos.png\n")
+
+# ==============================================================================
 # MAPAS DE INTERPOLACIÓN
 # ==============================================================================
 library(ggplot2)
@@ -143,3 +217,4 @@ for (variable_mapa in mis_variables_clima) {
 }
 
 cat("\nMapas guardados en output/figures/interpolacion_clima/\n")
+
