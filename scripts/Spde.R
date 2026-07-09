@@ -8,7 +8,7 @@ library(here)
 library(sf)
 
 # 1. Cargar el dataset maestro y la malla (si estás en una sesión nueva)
-dt_maestro   <- readRDS(here("data", "processed", "dataset_maestro_inla_2025_DIARIO.rds"))
+dt_maestro   <- readRDS(here("data", "processed", "Maestro", "diario", "dataset_maestro_inla_2025_DIARIO.rds"))
 malla_madrid <- readRDS(here("data", "processed", "malla_spde_madrid_gruesa.rds"))
 setDT(dt_maestro)
 

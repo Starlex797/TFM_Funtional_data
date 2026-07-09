@@ -1,5 +1,5 @@
 # ==============================================================================
-# EDA 2025
+# EDA 
 #===============================================================================
 # Structure of the analysis:
 #   1. Variogramas experimentales (variables con n ≥ 20 estaciones)
@@ -339,7 +339,7 @@ print(plot_perfil_horario)
 
 library(reshape2)
 
-dt_maestro_eda <- readRDS(here("data", "processed",
+dt_maestro_eda <- readRDS(here("data", "processed", "Maestro", "diario",
                                "dataset_maestro_inla_2025_DIARIO.rds"))
 
 cols_no2_hm     <- "DATO_DIARIO"
@@ -421,7 +421,7 @@ library(ggplot2)
 library(here)
 
 # 1. Cargar la base de datos maestra
-dt_maestro <- readRDS(here("data","processed","dataset_maestro_inla_2025_DIARIO.rds"))
+dt_maestro <- readRDS(here("data","processed","Maestro","diario","dataset_maestro_inla_2025_DIARIO.rds"))
 setDT(dt_maestro)
 
 # 2. Seleccionar un día específico (Corte Transversal Espacial)

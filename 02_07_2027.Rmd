@@ -1,0 +1,191 @@
+---
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+# Titulo del TFM 
+
+## Abstract 
+
+## Introducción 
+
+## Metodologia 
+
+
+
+## EDA 
+
+### MAPAS ESPACIO TEMPORALES 
+
+Necesitamos un mapa para explicar el problema del missaligment. Los mapas son de contaminacion. La explicacion del missaligment lo explicamos en la introduccion y en el apartado de metodologia que va antes de esto. 
+
+```{r, echo=FALSE, out.width="100%", fig.align="center", fig.cap="Estadísticos descriptivos diarios de NO2 por estación en Madrid (2025)"}
+knitr::include_graphics(here("outputs","mapas","mapa_estaciones_NO2_Madrid_2025.png"))
+```
+
+```{r, echo=FALSE, out.width="100%", fig.align="center", fig.cap="Estadísticos descriptivos diarios de NO2 por estación en Madrid (2025)"}
+knitr::include_graphics(here("outputs","mapas","estaciones_meteo_por_variable.png"))
+```
+```{r, echo=FALSE, out.width="100%", fig.align="center", fig.cap="Estadísticos descriptivos diarios de NO2 por estación en Madrid (2025)"}
+knitr::include_graphics(here("outputs","mapas","mapa_misalignment.png"))
+```
+### TABLA SOBRE LA VARIABLE OBJETIVO Y LAS COVARIABLES.
+
+#### Análisis descriptivo de la variable NO2 
+
+```{r, echo=FALSE, out.width="100%", fig.align="center", fig.cap="Estadísticos descriptivos diarios de NO2 por estación en Madrid (2025)"}
+knitr::include_graphics(here("outputs","descriptivo_NO2","descriptivo_NO2_diario_2025_por_estacion.png"))
+```
+
+
+En este caso solamente lo vamos a hacer para el año 2025, formato diario. 
+
+
+### Correlación espacial 
+
+### Correlación temporal 
+
+### SERIES TEMPORALES
+
+
+## Preprocesamiento
+
+Los datos de contaminación, climatológicos, tráfico  proceden de la red de estaciones del Ayuntamiento de Madrid, con resolución horaria. El preprocesamiento transforma los ficheros  en tres productos finales horario, diario y mensual. 
+
+### Preprocesamiento de las variables objentivos. 
+
+La variable objetivo del análisis es la concentración de dióxido de nitrógeno (NO₂), expresada en µg/m³.
+
+**1. Fusión con las coordenadas de las estaciones**
+
+Cada estación se identifica en los fichero por un código numérico. Se carga un fichero auxiliar de ubicaciones del que se extraen la longitud, la latitud y el nombre de cada punto de muestreo. Esta información se une a los datos de medición para disponer de la información necesaria en la imputación espacial y en el análisis exploratorio posterior.
+
+**2. Filtrado de variables y estaciones de interés**
+
+Únicamente se retienen las combinaciones estación-magnitud incluidas en dichos diccionarios, eliminando el resto de variables de contaminación o estaciones  antes de cualquier transformación.
+
+**3. Validación de mediciones horarias**
+
+El formato original incluye, para cada hora del día (H01–H24), una columna de valor y una columna de código de validación (V01–V24). Únicamente las observaciones con código `"V"` (válido) se conservan; cualquier otro código implica la asignación de `NA` al valor horario correspondiente.
+
+**4. Homogeneización de identificadores y construcción de la fecha**
+
+Los códigos numéricos de magnitudes y estaciones se sustituyen por sus nombres legibles mediante los diccionarios del proyecto. Las columnas temporales originales (año, mes y día en columnas separadas) se combinan en una única columna tipo Fecha. A continuación, las columnas de validación (V01–V24) y las columnas temporales originales (ANO, MES, DIA) se eliminan por resultar redundantes.
+
+**5. Reestructuración al formato largo**
+
+Los datos  tienen formato ancho: una fila por estación × magnitud × día, con 24 columnas de valor (H01–H24). Se pasa al formato largo: cada hora del día pasa a ser una fila independiente, con una columna `HORA` y una columna `DATO`. El resultado es una fila por estación × magnitud × fecha × hora, lo que facilita la agregación posterior.
+
+**6. Filtro y transformación logarítmica del NO₂ horario**
+
+Del conjunto limpio se extraen únicamente los registros correspondientes a la magnitud NO₂.Como se ha comprobado anteriormente que la variable N02 no sigue una distribución normal, se aplica la transformación `log(NO₂ + 1)` para aproximar la distribución a la normalidad, lo que es conveniente para la modelización posterior con INLA.
+
+**7. Agregación a escala diaria**
+
+A partir de los datos horarios de NO₂ se calcula la media diaria por estación. Se aplica un umbral de calidad: si más del 20 % de las horas del día presentan `NA`, el valor diario se declara `NA` en lugar de calcularse con información insuficiente. Adicionalmente, se construye un índice temporal secuencial (`ID_TIEMPO`) que asigna un entero único a cada fecha; este índice es necesario para la componente AR(1) del modelo INLA. La transformación logarítmica se aplica también sobre la media diaria.
+A diferencia de las covariables, no es necesario implementar ningún método de interpolación. Dado que el modelo INLA-SPDE será capaz de completar los valores NA. 
+
+**8. Agregación a escala mensual**
+
+A partir de los datos horarios de NO₂ se calcula la media mensual por estación. Se aplica el mismo umbral del 20 %: si más de un 20 % de las horas del mes presentan `NA`, el mes completo se declara sin dato para esa estación. La transformación logarítmica se aplica igualmente sobre el valor mensual resultante. POSDATA NO ESTAMOS HACIENDO EL LOG DEL LOG, ESTAMOS HACIENDO EL LOG DE LOS VALORES CRUDOS. 
+
+### Preprocesamiento de las covariables
+
+#### Preprocesamiento de tráfico. 
+
+**1. Carga de la cartografia oficial de Madrid y estandarización de los nombres geográficos.ficial de Madrid y estandarización de los nombres**
+
+Se descargan automáticamente los bordes o shapelines de distritos y barrios de Madrid desde el Geoportal del Ayuntamiento (IDEAM). Tras la descarga y descompresión, los nombres geográficos se estandarizan a minúsculas para facilitar el cruce posterior con los datos de tráfico.
+
+**2. Carga de datos brutos (bucle mensual)**
+
+Los datos de tráfico del Ayuntamiento de Madrid están disponibles mes a mes. Para cada uno de los doce meses del año se cargan dos ficheros CSV-
+
+El fichero de mediciones horarias de los detectores (intensidad y carga).
+
+El fichero de ubicaciones de los sensores con sus coordenadas UTM.
+
+**3. Formateo temporal (dentro de limpiar_trafico_espacial_horario)**
+Se crea adicionalmente una columna FECHA de tipo Date para facilitar las agregaciones posteriores.
+
+**4. Validación y filtrado de mediciones**
+
+Para cada variable de tráfico (intensidad y carga), se anulan —asignando NA— todas las observaciones que presenten código de error "E" (error) o "S" (sospechoso), así como cualquier valor negativo, que carece de sentido físico en este contexto.
+
+**5.Asignación espacial: distrito y barrio por sensor**
+
+Se asigna a cada sensor el distrito y el barrio en que se encuentra geográficamente, cruzando con los shapefiles cargados en el paso 1. Los sensores sin coordenadas válidas o sin asignación administrativa son descartados, ya que no pueden participar ni en la imputación ni en la agregación zonal.Ademá, los NAs residuales se ignoran al promediar por zona.
+
+**6. Imputación espacial de valores faltantes**
+
+Se identifican los sensores con valores NA. Si en ese mismo instante existe al menos un sensor con valor válido, se localiza el sensor válido más próximo geográficamente mediante el método **Vecino más cercano a través de la distancia Euclidea** y se transfiere su valor al sensor faltante. Este procedimiento garantiza que no se introduce información de momentos distintos, solo de sensores cercanos. 
+
+**7. Agregación horaria por zona** 
+
+A partir de los datos horarios limpios, se extrae la hora numérica (1–24) y se calcula la media de intensidad y carga para cada distrito y barrio,  Se registra además el número de detectores  que contribuyen a cada media en cada zona. 
+
+**8.Agregación diaria por zona**
+Se calcula la media diaria de intensidad y carga por distrito × fecha y por barrio × fecha, contando también el número de sensores. 
+
+**9.  Agregación mensual por zona**
+
+A partir de los datos diarios, se obtiene la media mensual por zona. Se aplica un umbral de calidad: si más del 20 % de los días del mes presentan NA en una zona, el valor mensual se declara como NA en lugar de calcularse con datos insuficientes. Se registra también el número de días con dato disponible. Aunque esto último se puede quitar porque ya no hay valores NA.
+
+#### Preprocesamiento de meteorología.
+
+Los datos meteorológicos proceden de la red de estaciones de calidad del aire y meteorología del Ayuntamiento de Madrid (AEMET/Ayuntamiento), que registra variables ambientales con resolución horaria. El preprocesamiento se articula en nueve pasos que transforman los ficheros brutos en tres productos finales —horario, diario y mensual. 
+
+
+**1. Fusión con las coordenadas de las estaciones**
+
+Se identifican cada estación únicamente por su código numérico. Se carga un fichero auxiliar de ubicaciones (`estaciones.csv`) y se extraen las coordenadas geográficas (longitud y latitud) y las coordenadas proyectadas en kilómetros, que serán necesarias para la elaboración del EDA y la imputación espacial. 
+
+**2. Filtrado de variables y estaciones de interés**
+
+A partir de los diccionarios creados  se descartan magnitudes y estaciones que no forman parte del análisis. Las variables retenidas son: **temperatura, humedad relativa, presión barométrica, velocidad del viento, precipitaciones, radiación solar y radiación ultravioleta**. Las 34 estaciones seleccionadas cubren de forma representativa los distintos distritos de Madrid. Cabe mencionar que estas estaciones no miden todas las variables seleccionadas.
+
+**3. Validación de mediciones horarias**
+
+En el formato original de los datos incluye, para cada hora del día (H01–H24), una columna de valor y una columna de código de validación (V01–V24). Al igual que en el caso de los datos de tráfico, Únicamente las observaciones con código `"V"` (válido) se conservan; cualquier otra es reemplazada por `NA`.
+
+**4. Homogeneización de los nombres de los identificadores y construcción de la fecha**
+
+El formato original de archivo tiene las  magnitudes y las estaciones en formato numérico. Por tanto,  sustituyen por sus nombres.En el apartado de fechas en el formato original se organiza en columnas separadas de año, mes y día, se combinan en una única columna `FECHA` de tipo `Date`. A continuación, las columnas de validación (V01–V24) y las temporales (ANO, MES, DIA) se eliminan por resultar redundantes.
+
+**5. Reestructuración del formato**
+
+Los datos brutos están en formato ancho: una fila por estación × magnitud × día, con 24 columnas de valor (H01–H24). Se realizan dos transformaciones consecutivas:
+
+- **De ancho a largo**: cada hora del día pasa a ser una fila independiente, con una columna `HORA` y una columna `VALOR_METEO`. El resultado es una fila por estación × magnitud × fecha × hora.
+
+- **De largo a ancho por magnitud** (*dcast*): las distintas magnitudes meteorológicas se llevan a columnas separadas. El resultado final es una fila por estación × fecha × hora, con una columna por variable climática. Esta estructura facilita la imputación multivariante y la agregación posterior.
+
+**6. Imputación de valores faltantes en dos pasos**
+
+Los `NA` residuales —debidos a sensores averiados o mediciones inválidas— se imputan mediante: 
+
+- **Interpolación lineal temporal**: dentro de cada estación y para cada variable, se rellena mediante interpolación lineal cualquier laguna de hasta 3 horas consecutivas (`maxgap = 3`).
+
+- **Paso 2 — Vecino más cercano espacial**: los `NA` que persisten tras la interpolación (lagunas más largas o estaciones sin dato durante un período prolongado) se imputan tomando el valor registrado en ese mismo instante por la estación geográficamente más próxima que disponga. La distancia se calcula como distancia euclidea en kilómetros a partir de las coordenadas proyectadas. Únicamente se transfieren valores del mismo instante temporal, evitando cualquier contaminación entre momentos distintos.
+
+Las estaciones que no miden una determinada variable (porcentaje de `NA` del 100 %) son ignoradas en el proceso de imputación de esa variable, ya que su ausencia es estructural y no un fallo de medición puntual.
+
+**7. Agregación a escala diaria**
+
+A partir de los datos horarios ya limpios e imputados, se calcula para cada estación y cada día:
+
+- **Media diaria** para las variables continuas (temperatura, humedad relativa, presión, velocidad del viento (incluyendo los 0), radiación solar y ultravioleta).
+- **Suma diaria** para la precipitación. 
+
+En ambos casos se aplica un umbral de calidad: si más del 30 % de las horas del día presentan `NA`, el valor diario se declara `NA` en lugar de calcularse con datos insuficientes.
+
+**8. Agregación a escala mensual**
+
+A partir de los datos diarios se obtiene la media mensual (o suma mensual en el caso de la precipitación) por estación. Se aplica el mismo umbral del 30 %: si más de un 30 % de los días del mes son `NA`, el mes completo se considera sin dato para esa variable y estación. ESTO ES UNA TONTERIA PORQUE SE SUPONE QUE YA LO HABIAMOS HECHO ANTES. 
+
+
+
+
+

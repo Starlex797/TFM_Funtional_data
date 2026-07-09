@@ -7,7 +7,7 @@ library(data.table)
 library(here)
 
 # 1. Cargar los objetos de los pasos anteriores
-dt_maestro   <- readRDS(here("data", "processed", "dataset_maestro_inla_2025_DIARIO.rds"))
+dt_maestro   <- readRDS(here("data", "processed", "Maestro", "diario", "dataset_maestro_inla_2025_DIARIO.rds"))
 malla_madrid <- readRDS(here("data", "processed", "malla_spde_madrid_gruesa.rds"))
 setDT(dt_maestro)
 

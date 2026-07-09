@@ -20,7 +20,7 @@ library(scoringRules)   # install.packages("scoringRules") si no está instalado
 # ------------------------------------------------------------------------------
 # 0. CARGAR DATOS Y RECONSTRUIR OBJETOS SPDE
 # ------------------------------------------------------------------------------
-dt_maestro   <- readRDS(here("data", "processed", "dataset_maestro_inla_2025.rds"))
+dt_maestro   <- readRDS(here("data", "processed", "Maestro", "diario", "dataset_maestro_inla_2025.rds"))
 malla_madrid <- readRDS(here("data", "processed", "malla_spde_madrid.rds"))
 setDT(dt_maestro)
 setorder(dt_maestro, ID_TIEMPO, ESTACION)

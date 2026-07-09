@@ -11,7 +11,7 @@ source(here("R", "cleaning_functions.R"))
 # Global Parameter in order to process the traffic data of Madrid for the year
 # Traffic data is only available for the whole year, but I had to download it month by month
 #===============================================================================
-anio <- 2020 # Year of the traffic data to process
+anio <- 2024 # Year of the traffic data to process
 meses <- c("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
 

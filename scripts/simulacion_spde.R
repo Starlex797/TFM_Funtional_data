@@ -23,7 +23,7 @@ dir.create(carpeta_sim, showWarnings = FALSE, recursive = TRUE)
 # 1. CARGA DE DATOS Y SELECCIÓN DE 19 DÍAS CONSECUTIVOS DE NOVIEMBRE
 # ==============================================================================
 
-dt_maestro <- readRDS(here("data", "processed",
+dt_maestro <- readRDS(here("data", "processed", "Maestro", "diario",
                            "dataset_maestro_inla_2025_DIARIO.rds"))
 setDT(dt_maestro)
 View()

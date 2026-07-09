@@ -16,11 +16,11 @@ sf_use_s2(FALSE)
 # BLOCK 0: CONFIGURATION (Only change the paths here!)
 # ==============================================================================
 
-ANIO <- 2019  
+ANIO <- 2025
 
-ruta_no2     <- here("data", "processed", "Contaminacion", "diario", paste0("aire_madrid_", ANIO, "_No2_trans_diarios.rds"))
-ruta_trafico <- here("data", "processed", paste0("trafico_madrid_", ANIO, "_diario_barrio.rds"))
-ruta_meteo   <- here("data", "processed", "Clima", "diario", paste0("meteo_madrid_", ANIO, "_diario.rds"))
+ruta_no2     <- here("data", "processed", "Contaminacion", "horario", paste0("aire_madrid_", ANIO, "_No2_horarios.rds"))
+ruta_trafico <- here("data", "processed", "Trafico", "horario", paste0("trafico_madrid_", ANIO, "_horario_barrio.rds"))
+ruta_meteo   <- here("data", "processed", "Clima", "horario", paste0("meteo_madrid_", ANIO, "_horario.rds"))
 
 # 2. OUTPUT paths
 # Output paths are set after Block 1 detects the temporal scale
@@ -57,7 +57,7 @@ if ("HORA" %in% names(dt_no2)) {
 escala_temporal <- if ("HORA" %in% llaves_tiempo) "horario" else "diario"
 ruta_out_clima   <- here("data", "processed", "Clima", escala_temporal,
                          paste0("clima_interpolado_", escala_temporal, "_", ANIO, ".rds"))
-ruta_out_maestro <- here("data", "processed",
+ruta_out_maestro <- here("data", "processed", "Maestro", escala_temporal,
                          paste0("dataset_maestro_inla_", ANIO, "_", toupper(escala_temporal), ".rds"))
 
 # Normalization of neighborhood names in the traffic dataset
@@ -70,7 +70,7 @@ mapa_distritos <- st_read(here("data", "raw", "geometrias", "madrid_distritos.ge
   st_make_valid() |> st_transform(25830)
 mapa_distritos$distrito <- limpiar_nombres(mapa_distritos$name)
 
-mapa_barrios <- st_read(here("data", "raw", "Geometrias", "BARRIOS.shp"), quiet = TRUE) |>
+mapa_barrios <- st_read(here("data", "raw", "geometrias", "BARRIOS.shp"), quiet = TRUE) |>
   st_make_valid() |> st_transform(25830)
 mapa_barrios$barrio <- limpiar_nombres(mapa_barrios$NOMBRE)
 
@@ -111,7 +111,8 @@ saveRDS(dt_clima_interp, ruta_out_clima)
 # ==============================================================================
 # Join Traffic using dynamic time keys + neighborhood
 llaves_trafico <- c(llaves_tiempo, "barrio")
-cols_trafico   <- c(llaves_trafico, "intensidad", "ocupacion", "carga")# Ojo que en el 2020 no está ocupacion 
+cols_trafico_candidatas <- c(llaves_trafico, "intensidad", "ocupacion", "carga")
+cols_trafico <- intersect(cols_trafico_candidatas, names(dt_trafico))
 
 dt_maestro <- merge(dt_no2, dt_trafico[, ..cols_trafico], by = llaves_trafico, all.x = TRUE)
 
@@ -190,6 +191,7 @@ setorderv(dt_maestro, intersect(c("FECHA", "HORA", "ID_TIEMPO", "ESTACION"), nam
 # ==============================================================================
 # BLOCK 7: SAVING AND QUALITY CONTROL
 # ==============================================================================
+dir.create(dirname(ruta_out_maestro), recursive = TRUE, showWarnings = FALSE)
 saveRDS(dt_maestro, ruta_out_maestro)
 View(dt_maestro)
 sf_use_s2(TRUE) 
@@ -316,3 +318,4 @@ p_trafico_maestro <- ggplot(mapa_trafico_maestro) +
 ruta_plot_trafico <- here("outputs", "plots", paste0("cobertura_trafico_maestro_", ANIO, "_", format(dia, "%Y%m%d"), ".png"))
 ggsave(filename = ruta_plot_trafico, plot = p_trafico_maestro, width = 8, height = 6, dpi = 200, bg = "white")
 cat("✅ Mapa de tráfico maestro guardado en:", ruta_plot_trafico, "\n")
+

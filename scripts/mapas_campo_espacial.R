@@ -30,7 +30,7 @@ library(here)
 # ------------------------------------------------------------------------------
 modelo_st    <- readRDS(here("data", "processed", "modelo_final_no2_madrid.rds"))
 malla_madrid <- readRDS(here("data", "processed", "malla_spde_madrid.rds"))
-dt_maestro   <- readRDS(here("data", "processed", "dataset_maestro_inla_2025.rds"))
+dt_maestro   <- readRDS(here("data", "processed", "Maestro", "diario", "dataset_maestro_inla_2025.rds"))
 setDT(dt_maestro)
 
 # Mapa de distritos en km (mismo CRS que la malla)

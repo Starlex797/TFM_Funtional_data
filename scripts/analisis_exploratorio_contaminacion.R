@@ -161,7 +161,7 @@ library(data.table)
 library(here)
 
 # 1. Cargar el dataset maestro (incluye covariables crudas y estandarizadas)
-dt_maestro <- readRDS(here("data", "processed", "dataset_maestro_inla_2025_DIARIO.rds"))
+dt_maestro <- readRDS(here("data", "processed", "Maestro", "diario", "dataset_maestro_inla_2025_DIARIO.rds"))
 setDT(dt_maestro)
 
 # 2. Seleccionar valores crudos (sin estandarizar) para una correlación interpretable

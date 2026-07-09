@@ -13,7 +13,7 @@ source(here("R", "cleaning_functions.R"))
 # Years to be processed
 # ==============================================================================
 
-anios_procesar <- c(2019)
+anios_procesar <- c(2025)
 
 
 

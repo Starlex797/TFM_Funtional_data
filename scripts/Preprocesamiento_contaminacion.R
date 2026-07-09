@@ -17,7 +17,7 @@ setDT(dt_ubicaciones_aire)
 # Strategy: for each year we first look for a single annual CSV (e.g. calidad_2025.csv).
 # If it does not exist we look for a monthly subfolder (e.g. Anio19/) and combine the
 # files with combinar_meses_anual() before cleaning.
-anios_analisis <- c(2019, 2023, 2024, 2025)
+anios_analisis <- c(2020,2021,2022)
 lista_historico_aire <- list()
 
 # Base folder that contains both the annual CSVs and the monthly subfolders

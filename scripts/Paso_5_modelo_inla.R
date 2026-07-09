@@ -19,7 +19,7 @@ library(sf)
 
 cat("Construyendo dataset de día tipo...\n")
 
-dt_diario <- readRDS(here("data", "processed", "dataset_maestro_inla_2025_DIARIO.rds"))
+dt_diario <- readRDS(here("data", "processed", "Maestro", "diario", "dataset_maestro_inla_2025_DIARIO.rds"))
 setDT(dt_diario)
 
 # Día de la semana ISO: 1 = lunes ... 7 = domingo (base R, sin lubridate)
@@ -230,7 +230,7 @@ write.csv(comparacion, here("output", "comparacion_modelos_dia_tipo.csv"), row.n
 
 
 # 1. Cargar dependencias de los pasos anteriores
-dt_maestro   <- readRDS(here("data", "processed", "dataset_maestro_inla_2025_DIARIO.rds"))
+dt_maestro   <- readRDS(here("data", "processed", "Maestro", "diario", "dataset_maestro_inla_2025_DIARIO.rds"))
 stk_madrid   <- readRDS(here("data", "processed", "inla_stack_madrid_2025.rds"))
 stk_madrid_s <- readRDS(here("data", "processed", "inla_stack_espacial_2025.rds"))
 malla_madrid <- readRDS(here("data", "processed", "malla_spde_madrid_gruesa.rds"))
