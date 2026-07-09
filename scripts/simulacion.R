@@ -1,19 +1,20 @@
 # ==============================================================================
-# SIMULACIÓN INLA-SPDE: BLOQUES 0–7 POR FRECUENCIA (MENSUAL → DIARIO → HORARIO)
+# SIMULACIÓN INLA-SPDE: BLOQUES 0–7 POR FRECUENCIA (DIARIO → HORARIO)
 # ==============================================================================
 # Objetivo:
-#   - Comparar 3 frecuencias temporales: MENSUAL, DIARIA, HORARIA
+#   - Comparar 2 frecuencias temporales: DIARIA, HORARIA
 #   - Para cada frecuencia (Bloques 0–7):
-#       • B0: Preparación de datos
-#       • B1: Selección de covariables (VIF + significancia + stepwise DIC)
-#       • B2: Modelo espacial SPDE (4 mallas)
-#       • B3: Diagnóstico de residuos del modelo espacial
-#       • B4: Modelo espacio-temporal AR1 (si B3 lo justifica)
-#       • B5: Diagnóstico de residuos del AR1
-#       • B6: Comparación y selección de modelos
-#       • B7: Tiempo de recuperación de zonas contaminadas
+#       • B0:   Preparación de datos
+#       • B0.5: Selección por residuos parciales (Y - beta*X iterativo)
+#       • B1:   Selección de covariables (VIF + significancia + stepwise DIC)
+#       • B2:   Modelo espacial SPDE (4 mallas)
+#       • B3:   Diagnóstico de residuos del modelo espacial
+#       • B4:   Modelo espacio-temporal AR1 (si B3 lo justifica)
+#       • B5:   Diagnóstico de residuos del AR1
+#       • B6:   Comparación y selección de modelos
+#       • B7:   Tiempo de recuperación de zonas contaminadas
 #   - Las variables candidatas se definen de forma independiente por frecuencia
-#     en la sección CONFIGURACIÓN GENERAL (COVS_MENSUAL/DIARIO/HORARIO_NOMBRES).
+#     en la sección CONFIGURACIÓN GENERAL (COVS_DIARIO/HORARIO_NOMBRES).
 #   - Outputs organizados en subcarpetas por bloque:
 #       seleccion/ | ACF/ | variograma/ | QQ/ | comparacion/ | recuperacion/
 # ==============================================================================
@@ -52,11 +53,6 @@ config_mallas <- list(
 # Mantener el mismo orden en Nombres y Alias.
 # ==============================================================================
 
-COVS_MENSUAL_NOMBRES  <- c("intensidad", "Temperatura",
-                             "Precipitaciones", "Velocidad Viento")
-COVS_MENSUAL_ALIAS    <- c("trafico_intensidad", "temperatura",
-                             "precipitacion", "velocidad_viento")
-
 COVS_DIARIO_NOMBRES   <- c("intensidad", "Temperatura",
                              "Precipitaciones", "Velocidad Viento")
 COVS_DIARIO_ALIAS     <- c("trafico_intensidad", "temperatura",
@@ -66,10 +62,6 @@ COVS_HORARIO_NOMBRES  <- c("intensidad", "Temperatura",
                              "Precipitaciones", "Velocidad Viento")
 COVS_HORARIO_ALIAS    <- c("trafico_intensidad", "temperatura",
                              "precipitacion", "velocidad_viento")
-
-# Columnas raw para re-estandarizar en mensual (no modificar)
-COLS_RAW_MENSUAL <- c("intensidad_raw", "Temperatura_raw",
-                       "Precipitaciones_raw", "Velocidad Viento_raw")
 
 # ==============================================================================
 # FUNCIONES AUXILIARES
@@ -107,12 +99,17 @@ preparar_datos <- function(frecuencia, periodo = "noviembre") {
 
     todas_fechas <- sort(unique(dt$FECHA))
 
+    # 4 semanas train + 1 semana test (28 dias si hay suficientes)
     if (periodo == "noviembre") {
       fechas_mes <- todas_fechas[format(todas_fechas, "%m") == "11"]
-      fechas_sel <- fechas_mes[13:17]
+      n_dias_disp <- length(fechas_mes)
+      n_dias_sel  <- min(28L, n_dias_disp)
+      fechas_sel  <- fechas_mes[seq_len(n_dias_sel)]
     } else if (periodo == "marzo") {
       fechas_mes <- todas_fechas[format(todas_fechas, "%m") == "03"]
-      fechas_sel <- fechas_mes[7:11]
+      n_dias_disp <- length(fechas_mes)
+      n_dias_sel  <- min(28L, n_dias_disp)
+      fechas_sel  <- fechas_mes[seq_len(n_dias_sel)]
     }
 
     dt <- dt[FECHA %in% fechas_sel]
@@ -120,16 +117,19 @@ preparar_datos <- function(frecuencia, periodo = "noviembre") {
       paste(FECHA, sprintf("%02d", HORA))))]
     setorder(dt, ID_TIEMPO_SIM, ESTACION)
     n_periodos <- uniqueN(dt$ID_TIEMPO_SIM)
-    n_test_p   <- 2L * 24L
+    # 1 semana de test (7 dias × 24 horas)
+    n_test_p   <- min(7L * 24L, floor(n_periodos * 0.25))
     n_train_p  <- n_periodos - n_test_p
     periodos   <- sort(unique(dt$ID_TIEMPO_SIM))
     periodos_train <- periodos[seq_len(n_train_p)]
     periodos_test  <- periodos[(n_train_p + 1L):n_periodos]
     dt[, es_train := ID_TIEMPO_SIM %in% periodos_train]
+    fecha_corte_train <- fechas_sel[ceiling(n_train_p / 24)]
+    fecha_corte_test  <- fechas_sel[ceiling(n_train_p / 24) + 1]
     lab_train <- sprintf("%s → %s (%d horas)",
-                         min(fechas_sel), fechas_sel[3], n_train_p)
+                         min(fechas_sel), fecha_corte_train, n_train_p)
     lab_test  <- sprintf("%s → %s (%d horas)",
-                         fechas_sel[4], max(fechas_sel), n_test_p)
+                         fecha_corte_test, max(fechas_sel), n_test_p)
 
   } else if (frecuencia == "diario") {
     dt <- readRDS(here("data", "processed", "Maestro", "diario",
@@ -139,67 +139,29 @@ preparar_datos <- function(frecuencia, periodo = "noviembre") {
 
     todas_fechas <- sort(unique(dt$FECHA))
 
+    # 2 meses train + 2 semanas test
     if (periodo == "noviembre") {
-      fechas_mes <- todas_fechas[format(todas_fechas, "%m") == "11"]
-      fechas_sel <- fechas_mes[1:19]
+      fechas_mes <- todas_fechas[format(todas_fechas, "%m") %in% c("10", "11")]
+      fechas_sel <- fechas_mes
     } else if (periodo == "marzo") {
-      fechas_mes <- todas_fechas[format(todas_fechas, "%m") == "03"]
-      fechas_sel <- fechas_mes[3:21]
+      fechas_mes <- todas_fechas[format(todas_fechas, "%m") %in% c("02", "03")]
+      fechas_sel <- fechas_mes
     }
 
     dt <- dt[FECHA %in% fechas_sel]
     dt[, ID_TIEMPO_SIM := match(FECHA, fechas_sel)]
     setorder(dt, ID_TIEMPO_SIM, ESTACION)
-    n_periodos <- 19L
-    n_test_p   <- 4L
-    n_train_p  <- 15L
+    n_periodos <- length(fechas_sel)
+    n_test_p   <- 14L
+    n_train_p  <- n_periodos - n_test_p
     periodos_train <- 1L:n_train_p
     periodos_test  <- (n_train_p + 1L):n_periodos
     dt[, es_train := ID_TIEMPO_SIM %in% periodos_train]
     lab_train <- sprintf("%s → %s (%d días)",
-                         fechas_sel[1], fechas_sel[15], n_train_p)
+                         fechas_sel[1], fechas_sel[n_train_p], n_train_p)
     lab_test  <- sprintf("%s → %s (%d días)",
-                         fechas_sel[16], fechas_sel[19], n_test_p)
-
-  } else if (frecuencia == "mensual") {
-    dt_diario <- readRDS(here("data", "processed", "Maestro", "diario",
-                              "dataset_maestro_inla_2025_DIARIO.rds"))
-    setDT(dt_diario)
-    dt_diario[, ANIO_MES := as.Date(format(FECHA, "%Y-%m-01"))]
-
-    dt <- dt_diario[, .(
-      DATO_NO2                  = mean(DATO_DIARIO,             na.rm = TRUE),
-      intensidad_raw            = mean(intensidad_raw,          na.rm = TRUE),
-      Temperatura_raw           = mean(Temperatura_raw,         na.rm = TRUE),
-      Precipitaciones_raw       = sum(Precipitaciones_raw,      na.rm = TRUE),
-      `Velocidad Viento_raw`    = mean(`Velocidad Viento_raw`,  na.rm = TRUE),
-      n_dias                    = .N
-    ), by = .(ESTACION, ANIO_MES, barrio, distrito, LONGITUD, LATITUD,
-              ID_DISTRITO)]
-
-    setnames(dt, "ANIO_MES", "FECHA")
-    dt[, LOG_NO2 := log(DATO_NO2)]
-
-    # Re-estandarizar a escala mensual
-    for (i in seq_along(COLS_RAW_MENSUAL)) {
-      dt[, (COVS_MENSUAL_NOMBRES[i]) := scale(get(COLS_RAW_MENSUAL[i]))[, 1]]
-    }
-
-    fechas_disp <- sort(unique(dt$FECHA))
-    n_periodos  <- length(fechas_disp)
-    n_test_p    <- 2L
-    n_train_p   <- n_periodos - n_test_p
-    dt[, ID_TIEMPO_SIM := match(FECHA, fechas_disp)]
-    setorder(dt, ID_TIEMPO_SIM, ESTACION)
-    periodos_train <- seq_len(n_train_p)
-    periodos_test  <- (n_train_p + 1L):n_periodos
-    dt[, es_train := ID_TIEMPO_SIM %in% periodos_train]
-    lab_train <- sprintf("%s → %s (%d meses)",
-                         fechas_disp[1], fechas_disp[n_train_p], n_train_p)
-    lab_test  <- sprintf("%s → %s (%d meses)",
-                         fechas_disp[n_train_p + 1], fechas_disp[n_periodos],
+                         fechas_sel[n_train_p + 1], fechas_sel[n_periodos],
                          n_test_p)
-    rm(dt_diario)
   }
 
   # Coordenadas UTM en km
@@ -241,6 +203,115 @@ crear_subcarpetas <- function(carpeta_base) {
   )
   lapply(subs, dir.create, showWarnings = FALSE, recursive = TRUE)
   subs
+}
+
+# ==============================================================================
+# BLOQUE 0.5 — SELECCIÓN POR RESIDUOS PARCIALES
+# ==============================================================================
+# Enfoque iterativo: en cada paso se identifica la covariable que más reduce
+# la variabilidad de Y, se resta su contribución lineal (Y <- Y - beta*X),
+# y se repite con las covariables restantes.
+# Resultado: orden de importancia marginal y tabla de reducciones.
+# ==============================================================================
+
+seleccion_por_residuos_parciales <- function(datos, covs_nombres, covs_alias,
+                                              carpeta_sel) {
+  dt <- datos$dt
+  alias_map <- setNames(covs_alias, covs_nombres)
+
+  covs_disp <- intersect(covs_nombres, names(dt))
+  todas_covs <- setNames(
+    lapply(covs_disp, function(nm) dt[[nm]]),
+    alias_map[covs_disp]
+  )
+
+  vars_pool <- names(todas_covs)
+  y_actual  <- dt$LOG_NO2
+  idx_train <- which(dt$es_train)
+
+  resultados <- list()
+  vars_seleccionadas <- character(0)
+  sd_original <- sd(y_actual[idx_train], na.rm = TRUE)
+
+  cat(sprintf("  [Residuos parciales] SD original de LOG_NO2 = %.4f\n",
+              sd_original))
+
+  for (paso in seq_along(vars_pool)) {
+    vars_restantes <- setdiff(vars_pool, vars_seleccionadas)
+    if (length(vars_restantes) == 0) break
+
+    # Probar cada covariable restante individualmente
+    errores <- sapply(vars_restantes, function(v) {
+      x_v <- todas_covs[[v]]
+      fit <- lm(y_actual[idx_train] ~ x_v[idx_train])
+      beta <- coef(fit)[2]
+      residuo <- y_actual - beta * x_v
+      sd(residuo[idx_train], na.rm = TRUE)
+    })
+
+    mejor_var <- names(which.min(errores))
+    x_mejor   <- todas_covs[[mejor_var]]
+
+    # Ajustar beta sobre train
+    fit_mejor  <- lm(y_actual[idx_train] ~ x_mejor[idx_train])
+    beta_mejor <- coef(fit_mejor)[2]
+
+    error_antes   <- sd(y_actual[idx_train], na.rm = TRUE)
+    y_actual      <- y_actual - beta_mejor * x_mejor
+    error_despues <- sd(y_actual[idx_train], na.rm = TRUE)
+    reduccion_pct <- (1 - error_despues / error_antes) * 100
+    reduccion_acum <- (1 - error_despues / sd_original) * 100
+
+    resultados[[paso]] <- data.frame(
+      Paso = paso,
+      Variable = mejor_var,
+      Beta = round(beta_mejor, 4),
+      SD_antes = round(error_antes, 4),
+      SD_despues = round(error_despues, 4),
+      Reduccion_pct = round(reduccion_pct, 2),
+      Reduccion_acumulada_pct = round(reduccion_acum, 2)
+    )
+
+    vars_seleccionadas <- c(vars_seleccionadas, mejor_var)
+
+    cat(sprintf("  Paso %d: restar '%s' (beta=%.4f) | SD: %.4f -> %.4f (%.1f%% paso | %.1f%% acum)\n",
+                paso, mejor_var, beta_mejor, error_antes, error_despues,
+                reduccion_pct, reduccion_acum))
+  }
+
+  tabla_res <- do.call(rbind, resultados)
+
+  guardar_tabla_png(
+    tabla_res,
+    titulo    = "Seleccion por Residuos Parciales",
+    subtitulo = sprintf("Y_nuevo = Y - beta*X en cada paso | SD original = %.4f",
+                        sd_original),
+    ruta_png  = file.path(carpeta_sel, "tabla_residuos_parciales.png"),
+    ancho_px  = 1000
+  )
+
+  # Grafico de reduccion acumulada
+  ggplot(tabla_res, aes(x = reorder(Variable, Paso), y = Reduccion_acumulada_pct)) +
+    geom_col(fill = "#2166AC", width = 0.6) +
+    geom_text(aes(label = sprintf("%.1f%%", Reduccion_acumulada_pct)),
+              vjust = -0.4, size = 3.5) +
+    labs(
+      title    = "Reduccion acumulada de variabilidad por covariable",
+      subtitle = "Orden de importancia marginal (residuos parciales)",
+      x = NULL, y = "Reduccion acumulada (%)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(face = "bold"),
+          axis.text.x = element_text(angle = 20, hjust = 1))
+  ggsave(file.path(carpeta_sel, "grafico_residuos_parciales.png"),
+         width = 8, height = 5, dpi = 300)
+
+  list(
+    orden_variables    = vars_seleccionadas,
+    tabla              = tabla_res,
+    y_residual_final   = y_actual,
+    sd_original        = sd_original
+  )
 }
 
 # ==============================================================================
@@ -748,11 +819,10 @@ calcular_recuperacion <- function(modelo_ar1, spde_obj, datos, sel,
 }
 
 # ==============================================================================
-# BUCLE PRINCIPAL — MENSUAL -> DIARIO -> HORARIO (Bloques 0-7)
+# BUCLE PRINCIPAL — DIARIO -> HORARIO (Bloques 0-7)
 # ==============================================================================
 
 ejecuciones <- list(
-  list(freq = "mensual", periodo = "anual"),
   list(freq = "diario",  periodo = "noviembre"),
   list(freq = "diario",  periodo = "marzo"),
   list(freq = "horario", periodo = "noviembre"),
@@ -776,7 +846,6 @@ for (ejec in ejecuciones) {
 
   # Covariables según frecuencia (modificar COVS_*_NOMBRES en config)
   covs_cfg <- switch(freq,
-    mensual = list(nombres = COVS_MENSUAL_NOMBRES, alias = COVS_MENSUAL_ALIAS),
     diario  = list(nombres = COVS_DIARIO_NOMBRES,  alias = COVS_DIARIO_ALIAS),
     horario = list(nombres = COVS_HORARIO_NOMBRES,  alias = COVS_HORARIO_ALIAS)
   )
@@ -787,6 +856,17 @@ for (ejec in ejecuciones) {
   cat(sprintf("  %d filas | %d estaciones | %d periodos (train=%d, test=%d)\n",
               nrow(datos$dt), uniqueN(datos$dt$ESTACION),
               datos$n_periodos, datos$n_train, datos$n_test))
+
+  # ── B0.5: Residuos parciales (orden de importancia marginal) ────────────
+  cat("  [B0.5] Seleccion por residuos parciales...\n")
+  res_parciales <- seleccion_por_residuos_parciales(
+    datos        = datos,
+    covs_nombres = covs_cfg$nombres,
+    covs_alias   = covs_cfg$alias,
+    carpeta_sel  = subs$seleccion
+  )
+  cat(sprintf("  Orden de importancia: %s\n",
+              paste(res_parciales$orden_variables, collapse = " > ")))
 
   # ── B1: Seleccion de covariables ─────────────────────────────────────────
   cat("  [B1] Seleccion de covariables...\n")

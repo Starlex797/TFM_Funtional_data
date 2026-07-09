@@ -39,7 +39,6 @@ knitr::include_graphics(here("outputs","mapas","mapa_misalignment.png"))
 knitr::include_graphics(here("outputs","descriptivo_NO2","descriptivo_NO2_diario_2025_por_estacion.png"))
 ```
 
-
 En este caso solamente lo vamos a hacer para el año 2025, formato diario. 
 
 
@@ -49,6 +48,10 @@ En este caso solamente lo vamos a hacer para el año 2025, formato diario.
 
 ### SERIES TEMPORALES
 
+### Justificación de transformaciones 
+
+#### Histograma de NO2 
+Usamos los datos diarios  y el log. Son 8637 observaciones. 
 
 ## Preprocesamiento
 
@@ -185,6 +188,8 @@ En ambos casos se aplica un umbral de calidad: si más del 30 % de las horas del
 
 A partir de los datos diarios se obtiene la media mensual (o suma mensual en el caso de la precipitación) por estación. Se aplica el mismo umbral del 30 %: si más de un 30 % de los días del mes son `NA`, el mes completo se considera sin dato para esa variable y estación. ESTO ES UNA TONTERIA PORQUE SE SUPONE QUE YA LO HABIAMOS HECHO ANTES. 
 
+
+### Creación del dataset maestro 
 
 
 
