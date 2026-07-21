@@ -3,6 +3,76 @@
 # Vista mensual (12 paneles) y por estación del año (4 paneles)
 # Outputs: outputs/series_por_estacion/mensual/ y /estacion_anio/
 # ==============================================================================
+ QUÉ HACE:
+#
+# - Carga el dataset maestro diario de 2025.
+# - Selecciona siete estaciones de interés:
+#     · El Pardo.
+#     · Casa de Campo.
+#     · Paseo de la Castellana.
+#     · Plaza Elíptica.
+#     · Moratalaz.
+#     · Arturo Soria.
+#     · Vallecas.
+#
+# - Elimina las filas sin una concentración diaria válida de NO2.
+# - Construye variables para:
+#     · Mes.
+#     · Día del mes.
+#     · Estación del año.
+#
+# - Genera dos gráficos para cada estación seleccionada.
+#
+# GRÁFICO MENSUAL:
+#
+# - Divide la serie diaria en doce paneles, uno por mes.
+# - Representa la evolución del NO2 a lo largo de los días de cada mes.
+# - Añade una línea horizontal con la mediana mensual.
+# - Añade una referencia horizontal en 40 µg/m³.
+#
+# GRÁFICO ESTACIONAL:
+#
+# - Divide la serie en cuatro paneles:
+#     · Invierno.
+#     · Primavera.
+#     · Verano.
+#     · Otoño.
+# - Representa la evolución diaria del NO2 dentro de cada estación del año.
+# - Añade una referencia horizontal en 40 µg/m³.
+#
+# FINALIDAD PARA EL TFM:
+#
+# Este script permite examinar detalladamente la evolución diaria del NO2 en un
+# conjunto representativo de estaciones.
+#
+# Las estaciones elegidas incluyen entornos de características diferentes, lo
+# que permite estudiar:
+#
+# - Diferencias entre estaciones urbanas y suburbanas.
+# - Episodios concretos de contaminación.
+# - Persistencia de concentraciones elevadas.
+# - Variabilidad dentro de cada mes.
+# - Cambios entre estaciones del año.
+# - Diferencias estacionales según la localización.
+#
+# Complementa los paneles generales porque permite observar con mayor claridad
+# el comportamiento individual de algunas estaciones relevantes para el TFM.
+#
+# OBSERVACIÓN SOBRE EL SCRIPT:
+#
+# En el gráfico mensual se dibuja una línea azul correspondiente a la mediana
+# mensual. Sin embargo, el texto del gráfico menciona una banda de rango
+# intercuartílico. Actualmente no se genera esa banda, por lo que sería
+# conveniente cambiar el texto o añadir realmente el rango intercuartílico.
+#
+# SALIDAS:
+#
+# outputs/series_por_estacion/
+#     · mensual/
+#     · estacion_anio/
+#
+# Se generan dos PNG por estación seleccionada.
+
 
 library(data.table)
 library(ggplot2)

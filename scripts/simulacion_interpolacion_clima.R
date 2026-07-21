@@ -5,12 +5,32 @@
 # ==============================================================================
 # EJECUCIÓN
 # ==============================================================================
-source(here("R","FUNCIONES_INTERPOLACION.R"))
+library(here)
+source(here("R", "FUNCIONES_INTERPOLACION.R"))
+library(ggplot2)
+library(viridis)
 
 
-mis_variables_clima <- c("Temperatura", "Humedad_Relativa", "Precipitaciones",
-                         "Presion Barométrica", "Radiación Solar", "Velocidad Viento")
+mis_variables_clima <- c(
+  "Temperatura", "Humedad_Relativa", "Precipitaciones",
+  "Presion_Barometrica", "Radiacion_Solar", "Velocidad Viento"
+)
+etiquetas_variables <- c(
+  Temperatura = "Temperatura",
+  Humedad_Relativa = "Humedad relativa",
+  Precipitaciones = "Precipitaciones",
+  Presion_Barometrica = "Presion barometrica",
+  Radiacion_Solar = "Radiacion solar",
+  `Velocidad Viento` = "Velocidad del viento"
+)
 dt_meteo <- readRDS(here("data", "processed", "Clima", "diario", "meteo_madrid_2025_diario.rds"))
+setDT(dt_meteo)
+
+# Normalizar columnas con acentos para no depender del locale de Windows/R.
+col_presion <- grep("^Presion Barom", names(dt_meteo), value = TRUE)
+col_radiacion <- grep("Solar$", names(dt_meteo), value = TRUE)
+if (length(col_presion) == 1L) setnames(dt_meteo, col_presion, "Presion_Barometrica")
+if (length(col_radiacion) == 1L) setnames(dt_meteo, col_radiacion, "Radiacion_Solar")
 
 # Día con lluvia y viento seleccionado para el análisis
 # (máxima precipitación media con 9 estaciones completas: 27.9 mm, viento 1.16 m/s)
@@ -64,10 +84,32 @@ tbl <- gt(tabla_display) |>
   ) |>
   opt_horizontal_padding(scale = 2)
 
-gtsave(tbl,
-       filename = here("output", "figures", "interpolacion_clima",
-                        "tabla_comparacion_metodos.png"),
-       vwidth = 1000)
+ruta_tabla <- here(
+  "output", "figures", "interpolacion_clima",
+  "tabla_comparacion_metodos.png"
+)
+tryCatch(
+  gtsave(tbl, filename = ruta_tabla, vwidth = 1000),
+  error = function(e) {
+    warning("gtsave no disponible; se usa gridExtra: ", conditionMessage(e))
+    tabla_grob <- gridExtra::tableGrob(
+      as.data.frame(tabla_display), rows = NULL,
+      theme = gridExtra::ttheme_minimal(base_size = 8)
+    )
+    titulo_grob <- grid::textGrob(
+      "Comparacion de metodos de interpolacion - LOOCV",
+      gp = grid::gpar(fontsize = 14, fontface = "bold")
+    )
+    combinado <- gridExtra::arrangeGrob(
+      titulo_grob, tabla_grob, ncol = 1,
+      heights = grid::unit(c(0.6, 4.8), "in")
+    )
+    ggplot2::ggsave(
+      ruta_tabla, combinado,
+      width = 12, height = 5.4, dpi = 150, bg = "white"
+    )
+  }
+)
 cat("Tabla comparativa guardada: tabla_comparacion_metodos.png\n")
 
 # --- Gráfico de barras RMSE por variable y método ---
@@ -144,7 +186,46 @@ f_mapa <- Z ~ 1
 
 dir.create(here("output", "figures", "interpolacion_clima"), recursive = TRUE, showWarnings = FALSE)
 
+# Incertidumbre empirica del IDW:
+# 1) prediccion leave-one-out en cada estacion;
+# 2) error cuadratico de cada estacion;
+# 3) RMSE local sobre la rejilla usando los mismos pesos IDW (p = 2).
+# No es una varianza posterior, sino un diagnostico espacial de error LOOCV.
+incertidumbre_idw_loocv <- function(sf_estaciones, coords_rejilla, idp = 2) {
+  coords_est <- st_coordinates(sf_estaciones)
+  valores <- sf_estaciones$Z
+  n_est <- nrow(coords_est)
+
+  residuos_loo <- vapply(seq_len(n_est), function(i) {
+    idx_train <- setdiff(seq_len(n_est), i)
+    distancias <- sqrt(
+      (coords_est[i, 1] - coords_est[idx_train, 1])^2 +
+        (coords_est[i, 2] - coords_est[idx_train, 2])^2
+    )
+    pesos <- 1 / pmax(distancias, 1)^idp
+    pred_loo <- sum(pesos * valores[idx_train]) / sum(pesos)
+    valores[i] - pred_loo
+  }, numeric(1))
+
+  dx_grid <- outer(coords_rejilla[, 1], coords_est[, 1], "-")
+  dy_grid <- outer(coords_rejilla[, 2], coords_est[, 2], "-")
+  dist_grid <- sqrt(dx_grid^2 + dy_grid^2)
+  pesos_grid <- 1 / pmax(dist_grid, 1)^idp
+  pesos_grid <- pesos_grid / rowSums(pesos_grid)
+
+  rmse_local <- sqrt(as.vector(pesos_grid %*% (residuos_loo^2)))
+  distancia_min_km <- apply(dist_grid, 1, min) / 1000
+
+  list(
+    rmse_local = rmse_local,
+    rmse_global = sqrt(mean(residuos_loo^2)),
+    residuos_loo = residuos_loo,
+    distancia_min_km = distancia_min_km
+  )
+}
+
 for (variable_mapa in mis_variables_clima) {
+  variable_label <- unname(etiquetas_variables[variable_mapa])
   
   cat(sprintf("\n--- Generando mapa: %s ---\n", variable_mapa))
   
@@ -188,9 +269,9 @@ for (variable_mapa in mis_variables_clima) {
     geom_point(data = coords_est, aes(X, Y),
                color = "black", size = 1.5, shape = 16, inherit.aes = FALSE) +
     facet_wrap(~ Metodo, ncol = 2) +
-    scale_fill_viridis_c(option = "turbo", name = variable_mapa) +
+    scale_fill_viridis_c(option = "turbo", name = variable_label) +
     labs(
-      title    = paste("Interpolación espacial:", variable_mapa),
+      title    = paste("Interpolación espacial:", variable_label),
       subtitle = paste("Madrid —", format(fecha_mapa, "%d %b %Y"),
                        "| Rejilla 100x100 | Puntos negros = estaciones reales"),
       caption  = "Métodos: Media global, 1-NN, kNN (k=5), IDW (p=2)"
@@ -214,6 +295,70 @@ for (variable_mapa in mis_variables_clima) {
     plot = p, width = 10, height = 8, dpi = 200, bg = "white"
   )
   cat(sprintf("  Guardado: interpolacion_%s.png\n", nombre_archivo))
+
+  # Mapa independiente de incertidumbre empirica del IDW.
+  incertidumbre <- incertidumbre_idw_loocv(
+    sf_estaciones = sf_estaciones,
+    coords_rejilla = coords_rejilla,
+    idp = 2
+  )
+  df_incertidumbre <- data.frame(
+    X = coords_rejilla[, 1],
+    Y = coords_rejilla[, 2],
+    Incertidumbre = incertidumbre$rmse_local
+  )
+
+  p_incertidumbre <- ggplot(
+    df_incertidumbre,
+    aes(X, Y, fill = Incertidumbre)
+  ) +
+    geom_tile(width = dx, height = dy) +
+    geom_path(
+      data = bordes_coords,
+      aes(x = X, y = Y, group = L1),
+      color = "white", linewidth = 0.35, inherit.aes = FALSE
+    ) +
+    geom_point(
+      data = coords_est, aes(X, Y),
+      color = "black", fill = "white", size = 2,
+      shape = 21, stroke = 0.7, inherit.aes = FALSE
+    ) +
+    scale_fill_viridis_c(
+      option = "magma", direction = -1,
+      name = paste0("RMSE local\n", variable_label)
+    ) +
+    coord_equal() +
+    labs(
+      title = paste("Incertidumbre empirica IDW:", variable_label),
+      subtitle = sprintf(
+        "Madrid - %s | LOOCV global RMSE = %.3f | %d estaciones",
+        format(fecha_mapa, "%d %b %Y"),
+        incertidumbre$rmse_global,
+        nrow(sf_estaciones)
+      ),
+      caption = paste(
+        "RMSE LOOCV local ponderado con IDW (p=2).",
+        "No representa una varianza posterior."
+      )
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      panel.grid = element_blank(),
+      axis.text = element_blank(),
+      axis.title = element_blank(),
+      plot.title = element_text(face = "bold", size = 13),
+      legend.position = "right"
+    )
+
+  ggsave(
+    here(
+      "output", "figures", "interpolacion_clima",
+      paste0("incertidumbre_IDW_", nombre_archivo, ".png")
+    ),
+    plot = p_incertidumbre,
+    width = 9, height = 7, dpi = 300, bg = "white"
+  )
+  cat(sprintf("  Guardado: incertidumbre_IDW_%s.png\n", nombre_archivo))
 }
 
 cat("\nMapas guardados en output/figures/interpolacion_clima/\n")

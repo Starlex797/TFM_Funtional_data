@@ -3,7 +3,78 @@
 # Todos los datos juntos · Diario y horario · Madrid 2025
 # Outputs: outputs/scatter_no2_covariables/general/
 # ==============================================================================
+ QUÉ HACE:
+#
+# - Carga los datasets maestros diario y horario de 2025.
+# - Elimina las filas sin una concentración válida de NO2.
+# - Analiza las ocho covariables meteorológicas y de tráfico.
+#
+# - Agrupa todas las estaciones y todas las observaciones en una única nube de
+#   puntos para cada covariable.
+# - No diferencia por:
+#     · Estación de contaminación.
+#     · Mes.
+#     · Estación del año.
+#     · Tipo de día.
+#
+# - Genera dos gráficos para cada covariable:
+#     · Scatter plot general diario.
+#     · Scatter plot general horario.
+#
+# - Los datos diarios se representan en azul.
+# - Los datos horarios se representan en rojo y con mayor transparencia debido
+#   al elevado número de observaciones.
+# - No añade líneas de tendencia.
+#
+# FINALIDAD PARA EL TFM:
+#
+# Este script proporciona la representación más general y directa de la relación
+# entre el NO2 y cada covariable.
+#
+# Sirve como diagnóstico inicial para comprobar:
+#
+# - La forma global de la relación.
+# - La presencia de valores extremos.
+# - Posibles relaciones lineales o no lineales.
+# - Heterocedasticidad.
+# - Zonas con alta concentración de observaciones.
+# - Diferencias visuales entre escala diaria y horaria.
+#
+# No obstante, al mezclar estaciones y periodos temporales, una relación global
+# puede estar condicionada por diferencias espaciales o estacionales. Por ello,
+# estos gráficos deben interpretarse junto con los scripts 11, 12 y 13.
+#
+# SALIDAS:
+#
+# outputs/scatter_no2_covariables/general/
+#
+# Se genera un scatter plot diario y otro horario para cada covariable.
 
+
+# ==============================================================================
+# SECUENCIA GENERAL DE ESTE BLOQUE
+# ==============================================================================
+#
+# Relación NO2-covariables por estación, mes y estación del año
+#     ->
+# Evolución temporal detallada de estaciones seleccionadas
+#     ->
+# Relación conjunta diferenciada por estación y época del año
+#     ->
+# Resumen de todas las covariables para cada estación de contaminación
+#     ->
+# Relación general sin ningún tipo de agrupación
+#
+# En conjunto, estos scripts estudian la relación entre el NO2 y las covariables
+# desde diferentes niveles de agregación.
+#
+# El script 14 ofrece la visión más general.
+# El script 12 diferencia por estación del año y estación de medición.
+# Los scripts 11 y 13 permiten estudiar cada estación individualmente.
+#
+# Esta comparación ayuda a evitar que una asociación global se interprete como
+# una relación homogénea cuando en realidad puede depender de la localización,
+# de la época del año o de la escala temporal utilizada.
 library(data.table)
 library(ggplot2)
 library(here)

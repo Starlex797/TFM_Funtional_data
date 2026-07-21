@@ -1,0 +1,487 @@
+<title>Cómo trata el misalignment el paper de Gryparis et al. (2009): guía paso a paso</title>
+<style>
+  :root {
+    --bg: #f3f5f6; --surface: #ffffff; --surface-2: #eef2f3;
+    --ink: #17232a; --muted: #59696f; --faint: #85959b;
+    --line: #dbe3e5; --line-strong: #c4d0d3;
+    --tfm: #0e6f7c;  --tfm-soft: #d6ebee;
+    --paper: #a8642a; --paper-soft: #f0e2d2;
+    --good: #2f7d5b; --warn: #b0842a; --bad: #b3452f;
+    --shadow: 0 1px 2px rgba(20,40,45,.06), 0 8px 24px rgba(20,40,45,.06);
+    --maxw: 71ch;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1315; --surface: #141d20; --surface-2: #182327;
+      --ink: #e7eef0; --muted: #9bacb1; --faint: #6b7d82;
+      --line: #24312f; --line-strong: #32433f;
+      --tfm: #3cb4c2; --tfm-soft: #113238; --paper: #d99553; --paper-soft: #372414;
+      --good: #59c191; --warn: #dcae5b; --bad: #e07a5f;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{--bg:#f3f5f6;--surface:#fff;--surface-2:#eef2f3;--ink:#17232a;--muted:#59696f;--faint:#85959b;--line:#dbe3e5;--line-strong:#c4d0d3;--tfm:#0e6f7c;--tfm-soft:#d6ebee;--paper:#a8642a;--paper-soft:#f0e2d2;--good:#2f7d5b;--warn:#b0842a;--bad:#b3452f;--shadow:0 1px 2px rgba(20,40,45,.06),0 8px 24px rgba(20,40,45,.06);}
+  :root[data-theme="dark"]{--bg:#0d1315;--surface:#141d20;--surface-2:#182327;--ink:#e7eef0;--muted:#9bacb1;--faint:#6b7d82;--line:#24312f;--line-strong:#32433f;--tfm:#3cb4c2;--tfm-soft:#113238;--paper:#d99553;--paper-soft:#372414;--good:#59c191;--warn:#dcae5b;--bad:#e07a5f;--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);}
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); line-height:1.62; font-size:16.5px; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 24px; }
+  .col { max-width:var(--maxw); }
+
+  header.hero { border-bottom:1px solid var(--line);
+    background: radial-gradient(120% 80% at 90% -10%, var(--paper-soft) 0%, transparent 55%), radial-gradient(90% 70% at 3% 0%, var(--tfm-soft) 0%, transparent 50%); }
+  .hero .wrap { padding-top:58px; padding-bottom:42px; }
+  .eyebrow { font-family:var(--mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin:0 0 18px; }
+  h1 { font-family:var(--serif); font-weight:600; font-size:clamp(29px,5vw,47px); line-height:1.08; letter-spacing:-.01em; margin:0 0 16px; text-wrap:balance; max-width:20ch; }
+  .lede { font-size:19px; color:var(--muted); max-width:63ch; margin:0 0 22px; }
+  .lede b { color:var(--ink); font-weight:600; }
+  .paperref { font-size:14px; color:var(--muted); border-left:3px solid var(--paper); padding:4px 0 4px 14px; max-width:62ch; }
+  .paperref b { color:var(--ink); }
+
+  nav.toc { margin-top:30px; display:grid; gap:2px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--line); }
+  nav.toc a { background:var(--surface); padding:12px 15px; text-decoration:none; color:var(--ink); display:flex; gap:10px; align-items:baseline; transition:background .15s; }
+  nav.toc a:hover { background:var(--surface-2); }
+  nav.toc .n { font-family:var(--mono); font-size:12px; color:var(--paper); font-weight:600; }
+  nav.toc .t { font-size:14px; line-height:1.3; }
+
+  section { padding:50px 0; border-bottom:1px solid var(--line); }
+  section:last-of-type { border-bottom:0; }
+  .kicker { font-family:var(--mono); font-size:12px; letter-spacing:.13em; text-transform:uppercase; color:var(--paper); margin:0 0 10px; font-weight:600; }
+  h2 { font-family:var(--serif); font-weight:600; font-size:clamp(23px,3.3vw,32px); line-height:1.15; letter-spacing:-.01em; margin:0 0 18px; text-wrap:balance; }
+  h3 { font-family:var(--sans); font-weight:650; font-size:18px; margin:32px 0 10px; }
+  p { margin:0 0 15px; } .col p, .col ul, .col ol { max-width:var(--maxw); }
+  ul, ol { padding-left:21px; margin:0 0 15px; } li { margin:6px 0; }
+  strong { font-weight:650; }
+  em.x { font-style:normal; font-weight:650; color:var(--paper); }
+  em.y { font-style:normal; font-weight:650; color:var(--tfm); }
+  .formula { font-family:var(--mono); background:var(--surface-2); border:1px solid var(--line); border-radius:7px; padding:2px 7px; font-size:14px; white-space:nowrap; }
+
+  .analogy { border-left:3px solid var(--paper); background:var(--surface); box-shadow:var(--shadow); border-radius:0 12px 12px 0; padding:19px 23px; margin:22px 0; max-width:var(--maxw); }
+  .analogy .lbl { font-family:var(--mono); font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--paper); font-weight:700; margin-bottom:8px; }
+  .analogy p:last-child { margin-bottom:0; }
+  .keypoint { background:var(--tfm-soft); border-radius:12px; padding:17px 22px; margin:20px 0; max-width:var(--maxw); }
+  .keypoint p { margin:0; } .keypoint p + p { margin-top:8px; }
+  .keypoint .lbl { font-weight:700; color:var(--tfm); font-size:12.5px; letter-spacing:.04em; text-transform:uppercase; margin-bottom:6px; display:block; }
+  .warnbox { background:var(--paper-soft); border-radius:12px; padding:17px 22px; margin:20px 0; max-width:var(--maxw); }
+  .warnbox .lbl { font-weight:700; color:var(--paper); font-size:12.5px; letter-spacing:.04em; text-transform:uppercase; margin-bottom:6px; display:block; }
+  .warnbox p { margin:0; }
+
+  figure { margin:26px 0; } figure svg { display:block; width:100%; height:auto; }
+  .figcard { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:20px; box-shadow:var(--shadow); overflow-x:auto; }
+  figcaption { font-size:13.5px; color:var(--muted); margin-top:12px; max-width:66ch; line-height:1.5; }
+  figcaption b { color:var(--ink); }
+
+  .tablecard { overflow-x:auto; border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); margin:24px 0; }
+  table { border-collapse:collapse; width:100%; font-size:14.5px; background:var(--surface); }
+  thead th { text-align:left; padding:13px 16px; background:var(--surface-2); font-size:12.5px; border-bottom:1px solid var(--line-strong); vertical-align:bottom; }
+  tbody td { padding:12px 16px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.45; }
+  tbody tr:last-child td { border-bottom:0; }
+  td.rowlabel, th.rowlabel { font-weight:650; color:var(--ink); background:var(--surface-2); }
+  .cast { min-width:640px; } .cast td.sym { font-family:var(--mono); font-weight:700; color:var(--paper); white-space:nowrap; }
+  .cov { min-width:560px; text-align:center; } .cov td, .cov th { text-align:center; } .cov td.m { text-align:left; font-weight:650; }
+  .good { color:var(--good); font-weight:700; } .warn { color:var(--warn); font-weight:700; } .bad { color:var(--bad); font-weight:700; }
+  .mono { font-family:var(--mono); font-size:12.5px; }
+
+  .steps { counter-reset:st; display:grid; gap:14px; margin:24px 0; max-width:var(--maxw); }
+  .step { position:relative; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px 18px 16px 58px; box-shadow:var(--shadow); }
+  .step::before { counter-increment:st; content:counter(st); position:absolute; left:16px; top:16px; width:28px; height:28px; border-radius:8px; background:var(--paper); color:#fff; font-weight:700; font-family:var(--mono); display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .step h4 { margin:0 0 5px; font-size:16px; font-weight:700; } .step p { margin:0; font-size:14.5px; color:var(--muted); } .step p b { color:var(--ink); }
+
+  .methods { display:grid; gap:14px; margin:24px 0; }
+  .method { border:1px solid var(--line); border-radius:12px; padding:18px 20px; background:var(--surface); box-shadow:var(--shadow); border-left:4px solid var(--line-strong); }
+  .method.m1 { border-left-color:var(--warn); } .method.m2 { border-left-color:var(--bad); } .method.m3 { border-left-color:var(--good); } .method.m4 { border-left-color:var(--tfm); }
+  .method h4 { margin:0 0 6px; font-size:16.5px; font-weight:700; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .method .verdict { font-family:var(--mono); font-size:11px; letter-spacing:.05em; text-transform:uppercase; font-weight:700; border-radius:20px; padding:2px 10px; }
+  .method.m1 .verdict { background:var(--paper-soft); color:var(--warn); } .method.m2 .verdict { background:var(--paper-soft); color:var(--bad); } .method.m3 .verdict { background:var(--tfm-soft); color:var(--good); } .method.m4 .verdict { background:var(--tfm-soft); color:var(--tfm); }
+  .method p { margin:0 0 8px; font-size:14.5px; } .method p:last-child { margin:0; }
+  .method .lab { font-weight:700; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+
+  footer { padding:36px 0 64px; color:var(--muted); font-size:13.5px; } footer .wrap { max-width:var(--maxw); } footer b { color:var(--ink); }
+
+  .t-lab { font-family:var(--sans); font-size:12.5px; fill:var(--muted); }
+  .t-labb { font-family:var(--sans); font-size:12.5px; font-weight:650; fill:var(--ink); }
+  .t-mono { font-family:var(--mono); font-size:11.5px; fill:var(--muted); }
+  .fill-paper { fill:var(--paper); } .fill-tfm { fill:var(--tfm); }
+  .stroke-paper { stroke:var(--paper); } .stroke-tfm { stroke:var(--tfm); } .s-line { stroke:var(--line-strong); } .s-bg2 { fill:var(--surface-2); }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Guía metodológica · TFM · lectura de paper</p>
+    <h1>Misalignment con covariables en otro sitio: el método de Gryparis et al.</h1>
+    <p class="lede">Este paper trata <b>exactamente tu problema</b>: la variable que explica (la exposición)
+      se mide en <b>unas</b> localizaciones y la respuesta en <b>otras distintas</b>. No es un problema de
+      escala punto-vs-área, sino de <b>localización</b>. Aquí tienes su flujo de trabajo paso a paso, con
+      esquemas, y el mapeo directo a tu NO₂.</p>
+    <p class="paperref">A. Gryparis, C. J. Paciorek, A. Zeka, J. Schwartz &amp; B. A. Coull (2009).
+      <b>«Measurement error caused by spatial misalignment in environmental epidemiology.»</b>
+      <i>Biostatistics</i>, 10(2), 258–274.</p>
+
+    <nav class="toc" aria-label="Índice">
+      <a href="#s1"><span class="n">01</span><span class="t">Qué misalignment resuelve</span></a>
+      <a href="#s2"><span class="n">02</span><span class="t">Los personajes (notación)</span></a>
+      <a href="#s3"><span class="n">03</span><span class="t">El flujo de trabajo general</span></a>
+      <a href="#s4"><span class="n">04</span><span class="t">¿El dataset maestro?</span></a>
+      <a href="#s5"><span class="n">05</span><span class="t">El campo latente</span></a>
+      <a href="#s6"><span class="n">06</span><span class="t">Los 4 métodos</span></a>
+      <a href="#s7"><span class="n">07</span><span class="t">Qué demuestran</span></a>
+      <a href="#s8"><span class="n">08</span><span class="t">Mapeo a tu TFM</span></a>
+    </nav>
+  </div>
+</header>
+
+<!-- 01 -->
+<section id="s1">
+  <div class="wrap col">
+    <p class="kicker">01 · El problema</p>
+    <h2>Qué tipo de misalignment resuelve este paper</h2>
+    <p>Los otros papers que viste trataban el desajuste de <strong>escala</strong> (punto vs. área). Este
+      trata otro, más cercano a ti: el de <strong>localización</strong>. Dos variables medidas <strong>en
+      puntos</strong>, pero <strong>en sitios que no coinciden</strong>:</p>
+    <ul>
+      <li>La <em class="x">exposición</em> (p. ej. contaminación) se mide en unos <strong>monitores</strong>.</li>
+      <li>La <em class="y">respuesta</em> (la salud) se mide en <strong>otras localizaciones</strong> (las
+        casas de los sujetos), donde <strong>no hay monitor</strong>.</li>
+    </ul>
+    <p>«La regresión estándar no se puede aplicar a datos desalineados así», dice el paper. Necesitas
+      estimar la exposición en el sitio de la respuesta — y ahí empiezan los problemas.</p>
+
+    <div class="keypoint">
+      <span class="lbl">El mapeo a tu TFM (tenlo presente todo el informe)</span>
+      <p><em class="x">Exposición</em> del paper = tu <strong>covariable climática</strong> (viento, Tª…),
+        medida en las <strong>estaciones meteo</strong> (= los monitores). &nbsp;·&nbsp;
+        <em class="y">Respuesta</em> del paper = tu <strong>NO₂</strong>, medido en las
+        <strong>estaciones de contaminación</strong> (= los sujetos). Es el mismo problema.</p>
+    </div>
+
+    <figure>
+      <div class="figcard">
+        <svg viewBox="0 0 760 240" role="img" aria-label="Monitores de exposición y localizaciones de respuesta que no coinciden">
+          <rect x="30" y="30" width="700" height="180" rx="12" class="s-bg2 s-line" stroke-width="1"/>
+          <!-- exposure monitors -->
+          <g class="fill-paper">
+            <path d="M110 70 l7 12 l-14 0 z"/><path d="M300 60 l7 12 l-14 0 z"/><path d="M470 90 l7 12 l-14 0 z"/>
+            <path d="M180 150 l7 12 l-14 0 z"/><path d="M600 130 l7 12 l-14 0 z"/><path d="M400 175 l7 12 l-14 0 z"/>
+          </g>
+          <!-- response locations -->
+          <g class="fill-tfm">
+            <circle cx="150" cy="110" r="5"/><circle cx="230" cy="80" r="5"/><circle cx="270" cy="140" r="5"/>
+            <circle cx="360" cy="105" r="5"/><circle cx="430" cy="140" r="5"/><circle cx="520" cy="70" r="5"/>
+            <circle cx="540" cy="160" r="5"/><circle cx="640" cy="95" r="5"/><circle cx="330" cy="55" r="5"/>
+            <circle cx="90" cy="160" r="5"/><circle cx="660" cy="175" r="5"/>
+          </g>
+          <!-- legend -->
+          <path d="M60 205 l7 12 l-14 0 z" class="fill-paper"/>
+          <text x="76" y="216" class="t-lab">▲ monitores de exposición (clima / meteo)</text>
+          <circle cx="380" cy="211" r="5" class="fill-tfm"/>
+          <text x="393" y="216" class="t-lab">● localizaciones de respuesta (NO₂)</text>
+        </svg>
+      </div>
+      <figcaption><b>El desalineamiento de localización.</b> Los triángulos (donde se mide la covariable) y
+        los círculos (donde se mide la respuesta) <b>no caen en los mismos puntos</b>. Para relacionarlos
+        hay que estimar la covariable donde están los círculos.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 02 -->
+<section id="s2">
+  <div class="wrap col">
+    <p class="kicker">02 · Notación</p>
+    <h2>Los personajes de la historia</h2>
+    <p>El paper usa unos símbolos que conviene tener claros; con ellos todo lo demás se entiende. El
+      asterisco <span class="formula">*</span> marca «en las localizaciones de la respuesta» (donde no hay
+      medida de exposición).</p>
+
+    <div class="tablecard">
+      <table class="cast">
+        <thead><tr><th class="rowlabel">Símbolo</th><th>Qué es</th><th>En tu TFM</th></tr></thead>
+        <tbody>
+          <tr><td class="sym">X</td><td>La <strong>exposición verdadera</strong> (lo que de verdad influye), desconocida</td><td>el viento real en cada sitio</td></tr>
+          <tr><td class="sym">W</td><td>La <strong>medida</strong> de X en los monitores (bien localizada, quizá con error de aparato)</td><td>el viento medido en las estaciones meteo</td></tr>
+          <tr><td class="sym">S</td><td>La <strong>predicción suavizada</strong> de X a partir de W (kriging / superficie)</td><td>el viento interpolado (tu IDW)</td></tr>
+          <tr><td class="sym">Y</td><td>La <strong>respuesta</strong> (la salud)</td><td>el NO₂</td></tr>
+          <tr><td class="sym">Z</td><td>Otras covariables <strong>sin error</strong> ni desalineamiento</td><td>covariables bien alineadas</td></tr>
+          <tr><td class="sym">X*, S*, Y*</td><td>Lo mismo, pero <strong>en las localizaciones de la respuesta</strong></td><td>en las estaciones de NO₂</td></tr>
+          <tr><td class="sym">β₁</td><td>El <strong>efecto de la exposición sobre la respuesta</strong> (lo que buscas)</td><td>el efecto del viento sobre el NO₂</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>El modelo de interés es: <span class="formula">g(media de Y*) = β₀ + β₁·X* + β_z·Z*</span>. El
+      problema: <strong>X* no se observa</strong> (no hay monitor en el sitio de la respuesta), así que
+      hay que reemplazarlo por una estimación — y eso mete error.</p>
+  </div>
+</section>
+
+<!-- 03 -->
+<section id="s3">
+  <div class="wrap col">
+    <p class="kicker">03 · Visión general</p>
+    <h2>El flujo de trabajo, en tres movimientos</h2>
+    <p>Todos los métodos del paper comparten el mismo esqueleto de tres pasos. Lo que cambia es <em>cómo</em>
+      hacen el paso 2→3, y eso define los cuatro métodos.</p>
+
+    <div class="steps">
+      <div class="step"><h4>Modelo de exposición</h4><p>Se ajusta una <b>superficie suave</b> a la covariable a partir de los monitores <b>W</b> (kriging, splines o un Proceso Gaussiano). Esto es «aprender el mapa» de la covariable.</p></div>
+      <div class="step"><h4>Predicción en el sitio de la respuesta</h4><p>Se usa esa superficie para obtener la covariable <b>donde está la respuesta</b>: la predicción <b>S*</b> en las localizaciones estrella. Aquí es donde nace el error de medida.</p></div>
+      <div class="step"><h4>Modelo de salud/respuesta</h4><p>Se relaciona <b>Y*</b> con la covariable estimada para estimar <b>β₁</b>. La pregunta clave: ¿metes S* como número fijo, o mantienes su incertidumbre?</p></div>
+    </div>
+
+    <figure>
+      <div class="figcard">
+        <svg viewBox="0 0 760 210" role="img" aria-label="Flujo: modelo de exposición, predicción, modelo de respuesta">
+          <rect x="20" y="70" width="170" height="70" rx="10" class="s-bg2 stroke-paper" stroke-width="1.3"/>
+          <text x="105" y="60" text-anchor="middle" class="t-mono">paso 1</text>
+          <text x="105" y="100" text-anchor="middle" class="t-labb">Modelo exposición</text>
+          <text x="105" y="120" text-anchor="middle" class="t-lab">W → superficie suave</text>
+
+          <path d="M190 105 L 245 105" fill="none" stroke="var(--line-strong)" stroke-width="2" marker-end="url(#a)"/>
+          <rect x="248" y="70" width="170" height="70" rx="10" class="s-bg2 stroke-paper" stroke-width="1.3"/>
+          <text x="333" y="60" text-anchor="middle" class="t-mono">paso 2</text>
+          <text x="333" y="100" text-anchor="middle" class="t-labb">Predice S*</text>
+          <text x="333" y="120" text-anchor="middle" class="t-lab">en sitios de la respuesta</text>
+
+          <path d="M418 105 L 473 105" fill="none" stroke="var(--line-strong)" stroke-width="2" marker-end="url(#a)"/>
+          <rect x="476" y="70" width="180" height="70" rx="10" fill="var(--tfm)" opacity="0.13"/>
+          <rect x="476" y="70" width="180" height="70" rx="10" fill="none" class="stroke-tfm" stroke-width="1.5"/>
+          <text x="566" y="60" text-anchor="middle" class="t-mono">paso 3</text>
+          <text x="566" y="100" text-anchor="middle" class="t-labb">Modelo respuesta</text>
+          <text x="566" y="120" text-anchor="middle" class="t-lab">Y* = β₀ + β₁·(cov) …</text>
+
+          <text x="690" y="105" class="t-labb" style="font-size:22px;">?</text>
+          <text x="333" y="175" text-anchor="middle" class="t-mono fill-paper">↑ el "punto de bifurcación": aquí se decide el método</text>
+          <defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--line-strong)"/></marker></defs>
+        </svg>
+      </div>
+      <figcaption><b>El esqueleto común.</b> Aprender la superficie de la covariable (1), predecirla donde
+        está la respuesta (2), y relacionarla con la respuesta (3). Los cuatro métodos del paper solo se
+        diferencian en <b>cómo</b> encaran el paso 3.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 04 -->
+<section id="s4">
+  <div class="wrap col">
+    <p class="kicker">04 · Tu pregunta directa</p>
+    <h2>¿Se hace un «dataset maestro» con la covariable en el sitio de la respuesta?</h2>
+    <p><strong>Sí — pero solo en el enfoque plug-in, y ahí está el problema.</strong> El plug-in hace
+      exactamente lo que preguntas: coge la predicción <span class="formula">S*</span> de la covariable en
+      las localizaciones de la respuesta y arma una <strong>tabla maestra</strong> donde S* es una columna
+      fija junto a Y y Z, y ajusta por mínimos cuadrados:</p>
+
+    <figure>
+      <div class="figcard">
+        <svg viewBox="0 0 760 190" role="img" aria-label="Tabla maestra del plug-in">
+          <text x="20" y="26" class="t-labb">Dataset maestro (enfoque plug-in)</text>
+          <g class="t-mono" style="font-size:13px;">
+            <rect x="20" y="40" width="120" height="28" class="s-bg2 s-line" stroke-width="1"/><text x="35" y="59" class="fill-tfm">Y* (NO₂)</text>
+            <rect x="140" y="40" width="160" height="28" class="s-bg2 s-line" stroke-width="1"/><text x="152" y="59" class="fill-paper">S* (clima interpolado)</text>
+            <rect x="300" y="40" width="110" height="28" class="s-bg2 s-line" stroke-width="1"/><text x="315" y="59">Z (otras)</text>
+          </g>
+          <g class="t-mono" style="font-size:13px; fill:var(--muted);">
+            <rect x="20" y="68" width="120" height="26" fill="none" class="s-line" stroke-width="1"/><text x="42" y="85">34.2</text>
+            <rect x="140" y="68" width="160" height="26" fill="none" class="s-line" stroke-width="1"/><text x="200" y="85">3.1</text>
+            <rect x="300" y="68" width="110" height="26" fill="none" class="s-line" stroke-width="1"/><text x="345" y="85">…</text>
+            <rect x="20" y="94" width="120" height="26" fill="none" class="s-line" stroke-width="1"/><text x="42" y="111">41.7</text>
+            <rect x="140" y="94" width="160" height="26" fill="none" class="s-line" stroke-width="1"/><text x="200" y="111">2.4</text>
+            <rect x="300" y="94" width="110" height="26" fill="none" class="s-line" stroke-width="1"/><text x="345" y="111">…</text>
+          </g>
+          <text x="150" y="150" class="t-mono fill-paper">S* entra como número FIJO ▲  →  se tira la incertidumbre de la interpolación</text>
+          <!-- OLS arrow -->
+          <path d="M430 95 L 500 95" fill="none" stroke="var(--line-strong)" stroke-width="2" marker-end="url(#b)"/>
+          <rect x="505" y="72" width="230" height="46" rx="8" fill="var(--tfm)" opacity="0.12" class="stroke-tfm" stroke-width="1.4"/>
+          <text x="620" y="92" text-anchor="middle" class="t-labb">OLS → β₁</text>
+          <text x="620" y="109" text-anchor="middle" class="t-lab">(mínimos cuadrados)</text>
+          <defs><marker id="b" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--line-strong)"/></marker></defs>
+        </svg>
+      </div>
+      <figcaption><b>El dataset maestro es el enfoque plug-in.</b> Es lo que tú haces con el IDW. El paper
+        lo analiza… y avisa de su trampa.</figcaption>
+    </figure>
+
+    <div class="warnbox">
+      <span class="lbl">La trampa: error de Berkson</span>
+      <p>Al usar S* en lugar del X* verdadero, se cuela un error <span class="formula">V* = X* − S*</span>.
+        El paper demuestra que este error es de tipo <strong>Berkson</strong> con estructura
+        <strong>espacialmente correlada y heterocedástica</strong> (no diagonal). Consecuencia clave: en un
+        modelo <strong>lineal</strong> con superficie suave, el <strong>β₁ es casi insesgado</strong> — <em>pero
+        su varianza está mal estimada (demasiado pequeña)</em>, así que los intervalos de confianza
+        <strong>no cubren bien</strong>. Y si la superficie es <strong>rugosa</strong>, o se
+        <strong>sobre-suaviza</strong>, o el modelo es <strong>no lineal</strong>, entonces β₁ además se
+        <strong>sesga</strong>.</p>
+    </div>
+    <p>En resumen: el dataset maestro <strong>sí se hace</strong> en el plug-in, pero tratar S* como dato
+      exacto es justo lo que el paper señala como insuficiente. Los métodos buenos <strong>no congelan</strong>
+      la covariable en una tabla.</p>
+  </div>
+</section>
+
+<!-- 05 -->
+<section id="s5">
+  <div class="wrap col">
+    <p class="kicker">05 · El campo latente</p>
+    <h2>Cómo entra la covariable como «cantidad incierta» y no como número</h2>
+    <p>La alternativa al número fijo es tratar la exposición como un <strong>campo latente</strong>: una
+      superficie con incertidumbre. El paper le pone un <strong>Proceso Gaussiano</strong> (covarianza
+      Matérn) a la exposición:</p>
+    <div class="analogy">
+      <div class="lbl">◆ La idea</div>
+      <p>En vez de decir «el viento en la estación de NO₂ <em>es</em> 3.1», el modelo dice «el viento ahí
+        es una <strong>distribución</strong> centrada en 3.1, con esta incertidumbre, correlacionada con la
+        de las estaciones vecinas». Esa distribución es la <strong>posterior intermedia</strong>
+        <span class="formula">[X* | W]</span> — el kriging <em>con</em> sus barras de error, no solo la media.</p>
+    </div>
+    <p>Formalmente, <span class="formula">X* = E(X*|W) + V*</span>: la media (lo que usa el plug-in) más un
+      residuo <span class="formula">V*</span> con varianza <span class="formula">Σ*</span>. El plug-in usa
+      solo la media y <strong>tira Σ*</strong>. Los métodos buenos <strong>conservan Σ*</strong> y lo
+      propagan hasta β₁.</p>
+
+    <div class="keypoint">
+      <span class="lbl">Dos formas de conservar la incertidumbre</span>
+      <p><strong>Totalmente bayesiano (conjunto):</strong> se ajustan a la vez el modelo de exposición y el
+        de respuesta; al estimar X* se usa información de <strong>W y también de Y*</strong>. Es lo más
+        correcto (imputación múltiple bien hecha).</p>
+      <p><strong>Bayesiano en dos etapas:</strong> se estima <span class="formula">[X*|W]</span> primero y
+        se usa como <strong>prior</strong> de X* en el modelo de respuesta, con toda su covarianza. Aproxima
+        muy bien al conjunto y no obliga a re-ajustar la exposición para cada análisis.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 06 -->
+<section id="s6">
+  <div class="wrap col">
+    <p class="kicker">06 · El menú</p>
+    <h2>Los cuatro métodos, ordenados</h2>
+    <p>El paper compara cuatro maneras de hacer el paso 3, de la peor idea a la mejor:</p>
+  </div>
+
+  <div class="wrap">
+    <div class="methods col">
+      <div class="method m1">
+        <h4>1 · Plug-in <span class="verdict">simple pero cojo</span></h4>
+        <p>El dataset maestro: mete S* como número fijo y ajusta por OLS.</p>
+        <p><span class="lab">Punto fuerte:</span> trivial de hacer (es tu IDW). <span class="lab">Fallo:</span>
+          β₁ insesgado solo si la superficie es suave y el modelo lineal; <strong>varianza subestimada</strong>
+          → intervalos que no cubren. Sesga si la superficie es rugosa o el modelo no lineal.</p>
+      </div>
+      <div class="method m2">
+        <h4>2 · Simulación de exposición <span class="verdict">no la uses</span></h4>
+        <p>Genera M realizaciones <span class="formula">X*(t) = S* + V*(t)</span> desde [X*|W], ajusta el modelo M veces y promedia.</p>
+        <p><span class="lab">Problema:</span> como resamplea ignorando Y*, es una imputación <strong>incorrecta</strong>;
+          convierte el problema en error de medida <em>clásico</em> e <strong>induce sesgo</strong> (atenúa β₁).
+          El paper <strong>recomienda evitarla</strong> — en su escenario rugoso la cobertura cayó al 0.4 %.</p>
+      </div>
+      <div class="method m3">
+        <h4>3 · Calibración por regresión fuera de muestra (RC-OOS) <span class="verdict">buena y barata</span></h4>
+        <p>Usa localizaciones de exposición <strong>reservadas</strong> para calibrar X** contra S** (y Z**), obtiene el ajuste y <strong>corrige</strong> las predicciones.</p>
+        <p><span class="lab">Ventaja:</span> poco sesgo y <strong>buena cobertura</strong>, y es fácil de
+          calcular. Ideal cuando la muestra es enorme y lo bayesiano no es viable. <span class="lab">Coste:</span>
+          menos eficiente; necesitas datos de exposición para reservar.</p>
+      </div>
+      <div class="method m4">
+        <h4>4 · Bayesiano (conjunto o dos etapas) <span class="verdict">lo correcto = «opción 3»</span></h4>
+        <p>Modela X* como <strong>campo latente</strong> y propaga su incertidumbre a β₁ (conjunto: todo a la vez; dos etapas: posterior como prior).</p>
+        <p><span class="lab">Ventaja:</span> varianzas correctas, maneja la correlación/heterocedasticidad de
+          forma natural, funciona incluso con superficies rugosas. <span class="lab">Coste:</span> más
+          cómputo; cuidado con el «feedback» si hay pocos monitores y muchas respuestas.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 07 -->
+<section id="s7">
+  <div class="wrap col">
+    <p class="kicker">07 · La prueba</p>
+    <h2>Qué demuestran las simulaciones</h2>
+    <p>El paper simula superficies de exposición de <strong>suave</strong> a <strong>rugosa</strong> y mide
+      la <strong>cobertura</strong> del intervalo del 95 % (debería ser ~95). El mensaje: <strong>cuanto más
+      rugosa/variable es la covariable, más falla el plug-in</strong>.</p>
+
+    <div class="tablecard">
+      <table class="cov">
+        <thead><tr><th class="rowlabel" style="text-align:left;">Método</th><th>Superficie suave</th><th>Moderada</th><th>Rugosa</th></tr></thead>
+        <tbody>
+          <tr><td class="m">Plug-in</td><td class="good">92 %</td><td class="warn">70 %</td><td class="bad">63 %</td></tr>
+          <tr><td class="m">Simulación exposición</td><td class="good">91 %</td><td class="bad">42 %</td><td class="bad">0.4 %</td></tr>
+          <tr><td class="m">RC-OOS (calibración)</td><td class="good">96 %</td><td class="good">96 %</td><td class="good">93 %</td></tr>
+          <tr><td class="m">Bayesiano (2 etapas)</td><td class="good">93 %</td><td class="warn">84 %</td><td class="good">91 %</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:14px; color:var(--muted); max-width:var(--maxw);">Cobertura del IC 95 % (objetivo:
+      95 %). Verde ≈ bien; naranja/rojo = demasiado baja (intervalos falsamente estrechos). Cifras
+      redondeadas de la Tabla 1 del paper (caso lineal).</p>
+
+    <div class="keypoint">
+      <span class="lbl">Las tres lecciones del paper</span>
+      <p>1) Si la superficie es <strong>suave</strong>, casi todo vale (incluido el plug-in). 2) La
+        <strong>simulación de exposición puede ser desastrosa</strong>. 3) Los conceptos de error de medida
+        explican por qué: el plug-in genera Berkson (insesgado pero mal calibrado); la simulación lo
+        reconvierte en error clásico (sesga).</p>
+    </div>
+    <p>En su caso real (partículas de tráfico ↔ peso al nacer, Boston), el plug-in dio β no significativo y
+      la calibración RC-OOS sí detectó el efecto — «pero no lo habrías sabido sin hacer la corrección».</p>
+  </div>
+</section>
+
+<!-- 08 -->
+<section id="s8">
+  <div class="wrap col">
+    <p class="kicker">08 · Tu proyecto</p>
+    <h2>Qué significa esto para tu TFM</h2>
+    <p>Tu situación es <strong>idéntica</strong> a la del paper (covariable en un sitio, respuesta en otro),
+      con este diccionario:</p>
+
+    <div class="tablecard">
+      <table>
+        <thead><tr><th class="rowlabel">En el paper</th><th>En tu TFM</th></tr></thead>
+        <tbody>
+          <tr><td class="rowlabel">Exposición X (contaminación)</td><td>Covariable climática (viento, Tª, presión…)</td></tr>
+          <tr><td class="rowlabel">Monitores de exposición</td><td>Estaciones meteorológicas</td></tr>
+          <tr><td class="rowlabel">Respuesta Y (salud)</td><td>NO₂</td></tr>
+          <tr><td class="rowlabel">Localizaciones de respuesta</td><td>Estaciones de contaminación</td></tr>
+          <tr><td class="rowlabel">Predicción S* (kriging)</td><td>Tu interpolación IDW</td></tr>
+          <tr><td class="rowlabel">Plug-in con dataset maestro</td><td>Lo que haces ahora</td></tr>
+          <tr><td class="rowlabel">β₁ (efecto exposición→salud)</td><td>Efecto del clima sobre el NO₂</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>La recomendación que se deduce, aplicada a tus variables</h3>
+    <ul>
+      <li><strong>Covariables suaves</strong> (presión, temperatura, radiación): superficie suave → el
+        <strong>plug-in es defendible</strong>. El propio paper dice que con superficie suave todo funciona.</li>
+      <li><strong>Covariables rugosas</strong> (viento, precipitación): aquí el plug-in <strong>subestima la
+        incertidumbre</strong> y puede sesgar → merecen un método mejor.</li>
+      <li>El <strong>upgrade barato</strong>: RC-OOS (calibración con estaciones reservadas). El
+        <strong>upgrade riguroso</strong>: el <strong>bayesiano en dos etapas / campo latente</strong> (la
+        «opción 3»), que propaga la incertidumbre a β.</li>
+    </ul>
+
+    <div class="keypoint">
+      <span class="lbl">Cómo redactarlo en la memoria</span>
+      <p>«Mi interpolación IDW seguida del modelo corresponde al <strong>enfoque plug-in</strong> de Gryparis
+        et al. (2009). Este induce un error de Berkson que deja el efecto casi insesgado bajo superficies
+        suaves, pero <strong>subestima su incertidumbre</strong> y puede sesgar con covariables espacialmente
+        rugosas. Como línea de mejora, para el viento adopto un enfoque de <strong>campo latente / dos
+        etapas</strong> que propaga esa incertidumbre.» — Esto demuestra que conoces el marco y sus límites.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b>Fuente.</b> A. Gryparis, C. J. Paciorek, A. Zeka, J. Schwartz &amp; B. A. Coull (2009),
+      <em>«Measurement error caused by spatial misalignment in environmental epidemiology»</em>,
+      <i>Biostatistics</i> 10(2):258–274, doi:10.1093/biostatistics/kxn033. · Métodos relacionados para
+      implementar el campo latente en INLA-SPDE: Cameletti, Gómez-Rubio &amp; Blangiardo (2019); Villejo,
+      Illian &amp; Swallow (2023); Muff et al. (2015); Krainski et al. (2019). · Tu proyecto:
+      <b>METODOLOGIA_INLA_SPDE_TESIS.md</b>, <b>simulacion_interpolacion_clima.R</b>.</p>
+  </div>
+</footer>

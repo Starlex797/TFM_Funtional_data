@@ -1,0 +1,12 @@
+{
+  "r.rpath.windows": "C:\\Program Files\\R\\R-4.4.2\\bin\\x64\\R.exe",
+  "r.rterm.windows": "C:\\Program Files\\R\\R-4.4.2\\bin\\x64\\R.exe",
+  "r.bracketedPaste": true,
+  "r.plot.useHttpgd": true,
+  "r.lsp.diagnostics": true,
+  "[r]": {
+    "editor.defaultFormatter": "REditorSupport.r",
+    "editor.formatOnSave": true
+  },
+  "r.styler.formatter": "styler::tidyverse_style"
+}

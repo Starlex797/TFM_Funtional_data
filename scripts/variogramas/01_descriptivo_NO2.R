@@ -1,12 +1,33 @@
 # ==============================================================================
 # ANÁLISIS DESCRIPTIVO — NO₂ (Datos crudos)
 # Madrid 2025 · Escala diaria · Por estación de monitoreo
-# ==============================================================================
+# ===============================================================================
+# Proporciona la primera caracterización cuantitativa del NO₂.
+# Permite comparar estaciones, detectar diferencias de nivel y variabilidad,
+# revisar la cobertura de datos e identificar distribuciones asimétricas o
+# valores extremos.
+# ===============================================================================
 
+# Finalidad. carga las concentraciones diarias de NO2, sin transformación logarítmica.
+# Calcula por estación el número de días válidos, media y mediana, desviación típica, min y mac y asímetría y curtosis.
+# Resultados se guardan en descriptivo_No2
+# ==============================================================================
+# Carga las concentraciones diarias de NO₂ de 2025, sin transformación logarítmica.
+# Calcula por estación:número de días válidos;
+# media y mediana;
+# desviación típica;
+# mínimo y máximo;
+# asimetría y curtosis.
+
+# Muestra los resultados en consola.
+# Genera una tabla formateada y coloreada.
+# Guarda:un CSV con las estadísticas;
+# una imagen PNG de la tabla.
+# ==============================================================================
 library(data.table)
 library(here)
-library(moments)  # skewness(), kurtosis()
-library(gt)       # tabla formateada → PNG
+library(moments) # skewness(), kurtosis()
+library(gt) # tabla formateada → PNG
 
 
 # ==============================================================================
@@ -14,19 +35,21 @@ library(gt)       # tabla formateada → PNG
 # ==============================================================================
 
 # Carga de datos diarios NO2 2025 (valores crudos, sin transformación log)
-dt_no2 <- readRDS(here("data", "processed", "contaminacion", "diario",
-                        "aire_madrid_2025_No2_trans_diarios.rds"))
+dt_no2 <- readRDS(here(
+  "data", "processed", "contaminacion", "diario",
+  "aire_madrid_2025_No2_trans_diarios.rds"
+))
 
 # Estadísticas por estación sobre todas las observaciones diarias válidas
 desc_no2 <- dt_no2[!is.na(DATO_DIARIO), .(
   N_dias    = .N,
-  Media     = round(mean(DATO_DIARIO),     2),
-  SD        = round(sd(DATO_DIARIO),       2),
-  Mediana   = round(median(DATO_DIARIO),   2),
+  Media     = round(mean(DATO_DIARIO), 2),
+  SD        = round(sd(DATO_DIARIO), 2),
+  Mediana   = round(median(DATO_DIARIO), 2),
   Asimetria = round(skewness(DATO_DIARIO), 3),
   Curtosis  = round(kurtosis(DATO_DIARIO), 3),
-  Min       = round(min(DATO_DIARIO),      2),
-  Max       = round(max(DATO_DIARIO),      2)
+  Min       = round(min(DATO_DIARIO), 2),
+  Max       = round(max(DATO_DIARIO), 2)
 ), by = ESTACION]
 
 setorder(desc_no2, ESTACION)
@@ -92,23 +115,31 @@ tbl_gt <- as.data.frame(desc_no2) |>
     source_note = md("Fuente: Red de Monitoreo de Calidad del Aire de Madrid \u00b7 Media diaria de registros horarios v\u00e1lidos (umbral NA \u2264 20\u202f%)")
   ) |>
   tab_style(
-    style     = list(cell_fill(color = "#1a3a5c"),
-                     cell_text(color = "white", weight = "bold", size = px(15))),
+    style = list(
+      cell_fill(color = "#1a3a5c"),
+      cell_text(color = "white", weight = "bold", size = px(15))
+    ),
     locations = cells_title(groups = "title")
   ) |>
   tab_style(
-    style     = list(cell_fill(color = "#1a3a5c"),
-                     cell_text(color = "#d0e4f5", size = px(11))),
+    style = list(
+      cell_fill(color = "#1a3a5c"),
+      cell_text(color = "#d0e4f5", size = px(11))
+    ),
     locations = cells_title(groups = "subtitle")
   ) |>
   tab_style(
-    style     = list(cell_fill(color = "#2c5f8a"),
-                     cell_text(color = "white", weight = "bold")),
+    style = list(
+      cell_fill(color = "#2c5f8a"),
+      cell_text(color = "white", weight = "bold")
+    ),
     locations = cells_column_labels()
   ) |>
   tab_style(
-    style     = list(cell_fill(color = "#2c5f8a"),
-                     cell_text(color = "white", weight = "bold")),
+    style = list(
+      cell_fill(color = "#2c5f8a"),
+      cell_text(color = "white", weight = "bold")
+    ),
     locations = cells_column_spanners()
   ) |>
   tab_options(
@@ -126,14 +157,16 @@ tbl_gt <- as.data.frame(desc_no2) |>
 carpeta_out <- here("outputs", "descriptivo_NO2")
 dir.create(carpeta_out, showWarnings = FALSE, recursive = TRUE)
 
-fwrite(desc_no2,
-       file.path(carpeta_out, "descriptivo_NO2_diario_2025_por_estacion.csv"))
+fwrite(
+  desc_no2,
+  file.path(carpeta_out, "descriptivo_NO2_diario_2025_por_estacion.csv")
+)
 
 gtsave(tbl_gt,
-       filename = file.path(carpeta_out, "descriptivo_NO2_diario_2025_por_estacion.png"),
-       zoom = 2, expand = 20)
+  filename = file.path(carpeta_out, "descriptivo_NO2_diario_2025_por_estacion.png"),
+  zoom = 2, expand = 20
+)
 
 cat("\n\u2705 Archivos guardados en outputs/descriptivo_NO2/:\n")
 cat("   \u00b7 descriptivo_NO2_diario_2025_por_estacion.csv\n")
 cat("   \u00b7 descriptivo_NO2_diario_2025_por_estacion.png\n")
-

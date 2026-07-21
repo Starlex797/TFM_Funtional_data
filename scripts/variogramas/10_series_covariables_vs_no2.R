@@ -4,7 +4,66 @@
 # Todas las estaciones superpuestas · Sin misalignment (filas completas)
 # Outputs: outputs/covariables_vs_no2/
 # ==============================================================================
-
+QUÉ HACE:
+#
+# - Carga el dataset maestro diario utilizado posteriormente en los modelos INLA.
+# - Elimina las filas que no tienen una medición válida de NO2.
+# - Esta eliminación evita asociaciones incorrectas entre contaminación,
+#   meteorología, tráfico y localización espacial.
+#
+# El script compara el NO2 con ocho covariables:
+#
+# Variables meteorológicas:
+#
+# - Temperatura.
+# - Humedad relativa.
+# - Precipitaciones.
+# - Presión barométrica.
+# - Radiación solar.
+# - Velocidad del viento.
+#
+# Variables de tráfico:
+#
+# - Intensidad del tráfico.
+# - Carga de tráfico.
+#
+# Para cada covariable:
+#
+# - Conserva únicamente las filas donde existen tanto el NO2 como la covariable.
+# - Calcula el porcentaje de cobertura conjunta.
+# - Transforma los datos a formato largo.
+# - Genera un gráfico con dos paneles:
+#     · Panel superior: serie diaria de NO2.
+#     · Panel inferior: serie diaria de la covariable.
+# - Superpone las series de todas las estaciones.
+# - Utiliza escalas verticales independientes, ya que las variables tienen
+#   unidades y rangos diferentes.
+#
+# FINALIDAD PARA EL TFM:
+#
+# Este script realiza una primera exploración temporal de la relación entre el
+# NO2 y sus posibles variables explicativas.
+#
+# Permite detectar:
+#
+# - Ciclos estacionales comunes.
+# - Relaciones temporales directas o inversas.
+# - Episodios meteorológicos asociados con reducciones del NO2.
+# - Aumentos de contaminación coincidentes con una mayor intensidad de tráfico.
+# - Posibles retrasos entre una covariable y la respuesta del NO2.
+# - Periodos con baja cobertura conjunta.
+# - Diferencias en estos patrones entre estaciones.
+#
+# Este análisis es un paso previo a:
+#
+# - Los análisis de correlación.
+# - La selección de covariables.
+# - La formulación de los modelos estadísticos.
+# - La interpretación de los coeficientes estimados posteriormente.
+#
+# SALIDAS:
+#
+# outputs/covariables_vs_no2/
 library(data.table)
 library(ggplot2)
 library(here)

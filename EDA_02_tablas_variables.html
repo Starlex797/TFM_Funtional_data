@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Descripción de variables — Tablas para Word</title>
+<style>
+  body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #000; margin: 24px; }
+  h2 { font-size: 12pt; margin: 22px 0 6px; }
+  p.nota { font-size: 9.5pt; color: #444; margin: 4px 0 10px; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
+  th, td { border: 1px solid #000; padding: 5px 8px; text-align: left; vertical-align: top; }
+  th { background: #D9E2F3; font-weight: bold; }
+  caption { text-align: left; font-weight: bold; font-size: 11pt; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<h2>Variable respuesta (objetivo)</h2>
+<table>
+  <tr><th>Variable</th><th>Nombre en datos</th><th>Tipo</th><th>Unidad</th><th>Rol</th></tr>
+  <tr><td>Concentración de NO₂</td><td>NO2 (magnitud 8)</td><td>Cuantitativa continua</td><td>µg/m³</td><td>Respuesta</td></tr>
+  <tr><td>NO₂ transformado</td><td>LOG_NO2 = log(NO2+1)</td><td>Cuantitativa continua</td><td>— (log µg/m³)</td><td>Respuesta modelada</td></tr>
+</table>
+<p class="nota">La red mide además SO₂, CO, NO, NOₓ, PM2.5, PM10 y O₃, pero el estudio se centra en el NO₂ (límite legal: 40 µg/m³ de media anual, Directiva 2008/50/CE).</p>
+
+<h2>Covariables — meteorológicas</h2>
+<table>
+  <tr><th>Variable</th><th>Nombre en datos</th><th>Tipo</th><th>Unidad</th><th>Rol</th></tr>
+  <tr><td>Temperatura</td><td>Temperatura</td><td>Cuantitativa continua</td><td>°C</td><td>Covariable</td></tr>
+  <tr><td>Humedad relativa</td><td>Humedad_Relativa</td><td>Cuantitativa continua</td><td>%</td><td>Covariable</td></tr>
+  <tr><td>Velocidad del viento</td><td>Velocidad Viento</td><td>Cuantitativa continua</td><td>m/s</td><td>Covariable</td></tr>
+  <tr><td>Presión barométrica</td><td>Presion Barométrica</td><td>Cuantitativa continua</td><td>hPa</td><td>Covariable</td></tr>
+  <tr><td>Radiación solar</td><td>Radiación Solar</td><td>Cuantitativa continua</td><td>W/m²</td><td>Covariable</td></tr>
+  <tr><td>Precipitaciones</td><td>Precipitaciones</td><td>Cuantitativa continua</td><td>mm (l/m²)</td><td>Covariable</td></tr>
+</table>
+<p class="nota">La red registra también dirección del viento y radiación ultravioleta, disponibles pero no incluidas como covariables. Verificar unidades de radiación y presión según la fuente.</p>
+
+<h2>Covariables — tráfico</h2>
+<table>
+  <tr><th>Variable</th><th>Nombre en datos</th><th>Tipo</th><th>Unidad</th><th>Rol</th></tr>
+  <tr><td>Intensidad de tráfico</td><td>intensidad</td><td>Cuantitativa discreta (conteo)</td><td>vehículos/hora</td><td>Covariable</td></tr>
+  <tr><td>Carga de tráfico</td><td>carga</td><td>Cuantitativa continua</td><td>% (saturación)</td><td>Covariable</td></tr>
+  <tr><td>Intensidad retardada</td><td>intensidad_lag1</td><td>Cuantitativa discreta</td><td>vehículos/hora (h−1)</td><td>Covariable derivada (solo escala horaria)</td></tr>
+</table>
+
+<h2>Dimensión espacial — coordenadas (s)</h2>
+<table>
+  <tr><th>Variable</th><th>Nombre en datos</th><th>Tipo</th><th>Unidad</th><th>Rol</th></tr>
+  <tr><td>Identificador de estación</td><td>ESTACION</td><td>Cualitativa nominal</td><td>—</td><td>Índice espacial (24 estaciones)</td></tr>
+  <tr><td>Longitud / Latitud</td><td>LONGITUD, LATITUD</td><td>Coordenada (continua)</td><td>grados (WGS84, EPSG:4326)</td><td>Localización original</td></tr>
+  <tr><td>Coordenadas proyectadas</td><td>X_km, Y_km</td><td>Coordenada (continua)</td><td>km (ETRS89 / UTM 30N, EPSG:25830)</td><td>Localización sᵢ del modelo</td></tr>
+</table>
+
+<h2>Dimensión temporal — instante (t)</h2>
+<table>
+  <tr><th>Variable</th><th>Nombre en datos</th><th>Tipo</th><th>Unidad</th><th>Rol</th></tr>
+  <tr><td>Fecha</td><td>FECHA</td><td>Temporal (fecha)</td><td>día</td><td>Índice temporal</td></tr>
+  <tr><td>Hora</td><td>HORA</td><td>Cuantitativa discreta / cíclica</td><td>hora (1–24)</td><td>Índice temporal (escala horaria)</td></tr>
+  <tr><td>Índice temporal del modelo</td><td>t_idx / ID_TIEMPO_SIM</td><td>Índice ordenado discreto</td><td>—</td><td>Instante tᵢ del modelo (AR1)</td></tr>
+  <tr><td>Tipo de día</td><td>laborable / finde</td><td>Cualitativa binaria</td><td>—</td><td>Covariable (perfil horario)</td></tr>
+  <tr><td>Mes</td><td>MES</td><td>Cualitativa ordinal / índice</td><td>mes</td><td>Índice / covariable temporal</td></tr>
+</table>
+
+</body>
+</html>

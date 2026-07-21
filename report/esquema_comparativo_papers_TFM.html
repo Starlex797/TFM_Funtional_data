@@ -1,0 +1,567 @@
+<title>Esquema comparativo: misalignment espacial en dos papers de referencia y el TFM</title>
+<style>
+  :root {
+    --bg: #f3f5f6; --surface: #ffffff; --surface-2: #eef2f3;
+    --ink: #17232a; --muted: #59696f; --faint: #85959b;
+    --line: #dbe3e5; --line-strong: #c4d0d3;
+    --tfm: #0e6f7c;  --tfm-soft: #d6ebee;      /* TFM */
+    --mor: #a8642a;  --mor-soft: #f0e2d2;      /* Alahmadi & Moraga */
+    --hw:  #7a4a72;  --hw-soft:  #eaddea;      /* He & Wong */
+    --good: #2f7d5b; --warn: #b0842a;
+    --shadow: 0 1px 2px rgba(20,40,45,.06), 0 8px 24px rgba(20,40,45,.06);
+    --maxw: 72ch;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1315; --surface: #141d20; --surface-2: #182327;
+      --ink: #e7eef0; --muted: #9bacb1; --faint: #6b7d82;
+      --line: #24312f; --line-strong: #32433f;
+      --tfm: #3cb4c2; --tfm-soft: #113238;
+      --mor: #d99553; --mor-soft: #372414;
+      --hw:  #c78ab0; --hw-soft:  #33202f;
+      --good: #59c191; --warn: #dcae5b;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f3f5f6; --surface: #ffffff; --surface-2: #eef2f3;
+    --ink: #17232a; --muted: #59696f; --faint: #85959b;
+    --line: #dbe3e5; --line-strong: #c4d0d3;
+    --tfm: #0e6f7c; --tfm-soft: #d6ebee; --mor: #a8642a; --mor-soft: #f0e2d2; --hw: #7a4a72; --hw-soft: #eaddea;
+    --good: #2f7d5b; --warn: #b0842a;
+    --shadow: 0 1px 2px rgba(20,40,45,.06), 0 8px 24px rgba(20,40,45,.06);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1315; --surface: #141d20; --surface-2: #182327;
+    --ink: #e7eef0; --muted: #9bacb1; --faint: #6b7d82;
+    --line: #24312f; --line-strong: #32433f;
+    --tfm: #3cb4c2; --tfm-soft: #113238; --mor: #d99553; --mor-soft: #372414; --hw: #c78ab0; --hw-soft: #33202f;
+    --good: #59c191; --warn: #dcae5b;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.62; font-size: 16.5px; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  .col { max-width: var(--maxw); }
+
+  header.hero {
+    border-bottom: 1px solid var(--line);
+    background:
+      radial-gradient(100% 80% at 92% -10%, var(--mor-soft) 0%, transparent 52%),
+      radial-gradient(90% 70% at 50% -5%, var(--hw-soft) 0%, transparent 48%),
+      radial-gradient(90% 70% at 2% 0%, var(--tfm-soft) 0%, transparent 50%);
+  }
+  .hero .wrap { padding-top: 56px; padding-bottom: 40px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 18px; }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(28px, 4.8vw, 46px); line-height: 1.08; letter-spacing: -.01em; margin: 0 0 16px; text-wrap: balance; max-width: 22ch; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 64ch; margin: 0 0 26px; }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  .works { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 760px) { .works { grid-template-columns: 1fr; } }
+  .work { border: 1px solid var(--line); border-radius: 12px; padding: 15px 16px; background: var(--surface); box-shadow: var(--shadow); }
+  .work .badge { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; margin-bottom: 7px; }
+  .work .badge .sq { width: 11px; height: 11px; border-radius: 3px; }
+  .work.hw .badge { color: var(--hw); }  .work.hw .sq { background: var(--hw); }
+  .work.mor .badge { color: var(--mor); } .work.mor .sq { background: var(--mor); }
+  .work.tfm .badge { color: var(--tfm); } .work.tfm .sq { background: var(--tfm); }
+  .work h3 { margin: 0 0 4px; font-size: 15px; font-weight: 700; line-height: 1.25; }
+  .work p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+  section { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .13em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(23px, 3.2vw, 31px); line-height: 1.15; letter-spacing: -.01em; margin: 0 0 18px; text-wrap: balance; }
+  h4 { font-family: var(--sans); font-weight: 650; font-size: 18px; margin: 30px 0 10px; }
+  p { margin: 0 0 15px; }
+  .col p, .col ul { max-width: var(--maxw); }
+  ul { padding-left: 20px; margin: 0 0 15px; } li { margin: 6px 0; }
+  strong { font-weight: 650; }
+  .formula { font-family: var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; padding: 2px 7px; font-size: 14px; white-space: nowrap; }
+
+  /* concept checklist */
+  .checklist { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 20px 24px; margin: 22px 0; }
+  .checklist h4 { margin: 0 0 12px; font-size: 15px; }
+  .checklist ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .checklist li { display: flex; gap: 11px; align-items: flex-start; font-size: 14.5px; }
+  .checklist .ck { color: var(--good); font-weight: 800; flex: none; }
+  .checklist b { color: var(--ink); }
+
+  /* tables */
+  .tablecard { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); margin: 24px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--surface); }
+  thead th { text-align: left; padding: 13px 16px; background: var(--surface-2); font-size: 12.5px; letter-spacing: .02em; border-bottom: 1px solid var(--line-strong); vertical-align: bottom; }
+  tbody td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; line-height: 1.45; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.rowlabel, th.rowlabel { font-weight: 650; color: var(--ink); background: var(--surface-2); }
+  .taxo { min-width: 720px; }
+  .taxo td.dir { font-weight: 650; }
+  .cmp { min-width: 780px; }
+  .cmp th.hw { color: var(--hw); border-top: 3px solid var(--hw); }
+  .cmp th.mor { color: var(--mor); border-top: 3px solid var(--mor); }
+  .cmp th.tfm { color: var(--tfm); border-top: 3px solid var(--tfm); }
+  .cmp td.rowlabel { width: 20%; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .pill { display: inline-block; font-size: 11.5px; font-weight: 650; border-radius: 20px; padding: 2px 9px; background: var(--surface-2); color: var(--ink); }
+  .pill.a { background: var(--hw-soft); color: var(--hw); }
+  .pill.b { background: var(--tfm-soft); color: var(--tfm); }
+
+  figure { margin: 26px 0; }
+  figure svg { display: block; width: 100%; height: auto; }
+  .figcard { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: var(--shadow); overflow-x: auto; }
+  figcaption { font-size: 13.5px; color: var(--muted); margin-top: 12px; max-width: 66ch; line-height: 1.5; }
+  figcaption b { color: var(--ink); }
+
+  .keypoint { background: var(--tfm-soft); border-radius: 12px; padding: 17px 22px; margin: 20px 0; max-width: var(--maxw); }
+  .keypoint p { margin: 0; } .keypoint p + p { margin-top: 8px; }
+  .keypoint .lbl { font-weight: 700; color: var(--tfm); font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; display: block; }
+
+  /* coverage matrix */
+  .cov { overflow-x: auto; }
+  .covgrid { min-width: 640px; border-collapse: collapse; width: 100%; background: var(--surface); font-size: 14px; }
+  .covgrid th, .covgrid td { border: 1px solid var(--line); padding: 12px 14px; text-align: center; }
+  .covgrid thead th { background: var(--surface-2); }
+  .covgrid th.type { text-align: left; background: var(--surface-2); font-weight: 650; width: 30%; }
+  .covgrid .yes { font-weight: 700; }
+  .covgrid .yes.hw { color: var(--hw); } .covgrid .yes.mor { color: var(--mor); } .covgrid .yes.tfm { color: var(--tfm); }
+  .covgrid .no { color: var(--faint); }
+  .covgrid .ex { display: block; font-size: 11.5px; color: var(--muted); margin-top: 3px; font-weight: 400; }
+  .covgrid td.first { background: var(--surface-2); text-align: left; }
+  .covgrid td.first b { display: block; } .covgrid td.first span { font-size: 12px; color: var(--muted); }
+  .colhw { color: var(--hw); } .colmor { color: var(--mor); } .coltfm { color: var(--tfm); }
+
+  footer { padding: 36px 0 64px; color: var(--muted); font-size: 13.5px; }
+  footer .wrap { max-width: var(--maxw); } footer b { color: var(--ink); }
+
+  .t-lab { font-family: var(--sans); font-size: 12.5px; fill: var(--muted); }
+  .t-labb { font-family: var(--sans); font-size: 12.5px; font-weight: 650; fill: var(--ink); }
+  .t-mono { font-family: var(--mono); font-size: 11.5px; fill: var(--muted); }
+  .fill-tfm { fill: var(--tfm); } .fill-mor { fill: var(--mor); } .fill-hw { fill: var(--hw); }
+  .stroke-mor { stroke: var(--mor); } .stroke-tfm { stroke: var(--tfm); }
+  .s-bg2 { fill: var(--surface-2); } .s-line { stroke: var(--line-strong); }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Esquema comparativo · TFM · 16 jul 2026</p>
+    <h1>Misalignment espacial: dos papers de referencia y el proyecto TFM</h1>
+    <p class="lede">Un esquema en una página que sitúa <b>mi proyecto de NO₂ en Madrid</b> frente a dos
+      trabajos publicados que resuelven el <b>desalineamiento espacial</b> con INLA-SPDE. Recoge el marco
+      conceptual, el mecanismo común y una comparación a tres columnas.</p>
+
+    <div class="works">
+      <div class="work hw">
+        <span class="badge"><span class="sq"></span>Paper 1</span>
+        <h3>He &amp; Wong (2021)</h3>
+        <p>Fusión de datos in-situ y satélite. Clorofila-a en un lago. Un solo campo SPDE compartido.</p>
+      </div>
+      <div class="work mor">
+        <span class="badge"><span class="sq"></span>Paper 2</span>
+        <h3>Alahmadi &amp; Moraga (2025)</h3>
+        <p>Marco general de <i>melding</i> bayesiano. Malaria, PM2.5 y cáncer de pulmón. Matriz A modificada.</p>
+      </div>
+      <div class="work tfm">
+        <span class="badge"><span class="sq"></span>Mi TFM</span>
+        <h3>NO₂ en Madrid</h3>
+        <p>Respuesta puntual + covariables desalineadas. Alineación previa (IDW, polígonos) + SPDE + AR(1).</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ 01 MARCO CONCEPTUAL ============ -->
+<section id="s1">
+  <div class="wrap col">
+    <p class="kicker">01 · Marco conceptual</p>
+    <h2>Qué es el misalignment y qué tipos existen</h2>
+    <p><strong>Misalignment</strong> (desalineamiento espacial) = combinar datos que <strong>no están
+      medidos en el mismo soporte</strong>. Un dato puede ser <strong>de punto</strong> (valor en una
+      coordenada exacta) o <strong>de área</strong> (promedio sobre una región). El desajuste puede estar
+      en dos sitios: en la <strong>respuesta</strong> o entre la <strong>respuesta y las covariables</strong>.</p>
+  </div>
+
+  <div class="wrap">
+    <div class="tablecard">
+      <table class="taxo">
+        <thead>
+          <tr>
+            <th class="rowlabel">Tipo</th>
+            <th>Dónde está el desajuste</th>
+            <th>Soporte de la respuesta</th>
+            <th>Soporte de la covariable</th>
+            <th>Dirección de alineación</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="rowlabel"><span class="pill a">A</span></td>
+            <td>En la <strong>respuesta</strong> (la misma variable llega en puntos y áreas)</td>
+            <td>puntos <strong>+</strong> áreas mezclados</td>
+            <td>superficie continua: se lee <strong>puntual</strong> en filas-punto y <strong>promediada</strong> en filas-área</td>
+            <td class="dir">— (la resuelve la matriz A)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel"><span class="pill b">B1</span></td>
+            <td>Respuesta ↔ covariable, respuesta areal</td>
+            <td>áreas</td>
+            <td>puntos → se agregan a la escala del área</td>
+            <td class="dir">Agregar (up-scaling)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel"><span class="pill b">B2</span></td>
+            <td>Respuesta ↔ covariable, respuesta puntual, covariable areal</td>
+            <td>puntos</td>
+            <td>áreas → se asignan/desagregan al punto</td>
+            <td class="dir">Desagregar (downscaling)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel"><span class="pill b">B3</span></td>
+            <td>Respuesta ↔ covariable, ambos puntos en sitios distintos</td>
+            <td>puntos</td>
+            <td>puntos en otro sitio → se interpolan al punto de la respuesta</td>
+            <td class="dir">Interpolar (lateral)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col">
+      <div class="keypoint">
+        <span class="lbl">La regla que unifica todo</span>
+        <p>Una covariable <strong>siempre acaba expresada en la misma escala que la observación de la
+          respuesta a la que acompaña</strong>. Lo que cambia entre tipos es en qué dirección hay que
+          moverla: agregar, desagregar o interpolar.</p>
+      </div>
+    </div>
+
+    <figure>
+      <div class="figcard">
+        <svg viewBox="0 0 760 230" role="img" aria-label="Las tres direcciones de alineación de una covariable">
+          <rect x="310" y="85" width="140" height="60" rx="12" fill="var(--tfm)" opacity="0.14"/>
+          <rect x="310" y="85" width="140" height="60" rx="12" fill="none" class="stroke-tfm" stroke-width="1.6"/>
+          <text x="380" y="112" text-anchor="middle" class="t-labb">Respuesta Y</text>
+          <text x="380" y="131" text-anchor="middle" class="t-lab">(su soporte manda)</text>
+
+          <!-- up-scaling -->
+          <g class="fill-mor"><circle cx="70" cy="40" r="5"/><circle cx="110" cy="55" r="5"/><circle cx="90" cy="80" r="5"/></g>
+          <rect x="150" y="35" width="70" height="48" rx="6" fill="var(--mor)" opacity="0.16" class="stroke-mor" stroke-width="1.2"/>
+          <path d="M225 60 C 270 60, 275 95, 308 100" fill="none" class="stroke-mor" stroke-width="1.8" marker-end="url(#am)"/>
+          <text x="60" y="105" class="t-mono">puntos → área</text>
+          <text x="150" y="105" class="t-mono fill-mor">AGREGAR (B1)</text>
+
+          <!-- downscaling -->
+          <rect x="150" y="150" width="70" height="48" rx="6" fill="var(--tfm)" opacity="0.14" class="stroke-tfm" stroke-width="1.2"/>
+          <g class="fill-tfm"><circle cx="70" cy="170" r="5"/><circle cx="105" cy="185" r="5"/></g>
+          <path d="M225 175 C 270 175, 275 140, 308 130" fill="none" class="stroke-tfm" stroke-width="1.8" marker-end="url(#at)"/>
+          <text x="45" y="215" class="t-mono">área → puntos</text>
+          <text x="150" y="215" class="t-mono fill-tfm">DESAGREGAR (B2)</text>
+
+          <!-- interpolate lateral -->
+          <g class="fill-tfm"><circle cx="640" cy="70" r="5"/><circle cx="690" cy="55" r="5"/><circle cx="710" cy="95" r="5"/><circle cx="660" cy="110" r="5"/></g>
+          <circle cx="678" cy="82" r="6" fill="none" class="stroke-tfm" stroke-width="1.6" stroke-dasharray="3 2"/>
+          <path d="M452 110 C 520 110, 560 85, 632 82" fill="none" class="stroke-tfm" stroke-width="1.8" marker-end="url(#at)"/>
+          <text x="600" y="140" class="t-mono">puntos → punto de Y</text>
+          <text x="600" y="158" class="t-mono fill-tfm">INTERPOLAR (B3)</text>
+
+          <defs>
+            <marker id="am" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--mor)"/></marker>
+            <marker id="at" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--tfm)"/></marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption><b>Las tres direcciones de alineación.</b> Sea cual sea el tipo, la covariable se mueve
+        hasta la escala de la respuesta: agregándola a un área (B1), desagregándola a puntos (B2) o
+        interpolándola entre puntos (B3).</figcaption>
+    </figure>
+
+    <div class="col">
+      <div class="checklist">
+        <h4>Conceptos que quedaron aclarados (y dónde están en este esquema)</h4>
+        <ul>
+          <li><span class="ck">✓</span><span><b>Hay dos tipos de misalignment</b> (A en la respuesta; B entre respuesta y covariable) — y no son lo mismo. → §01, tabla.</span></li>
+          <li><span class="ck">✓</span><span><b>Las covariables pueden ir cada una a su escala</b>, distinta de la respuesta y entre ellas. → §01, tabla / §03.</span></li>
+          <li><span class="ck">✓</span><span><b>En el Tipo A la covariable sigue el soporte de cada fila</b>: puntual donde Y es punto, promediada donde Y es área. → §02.</span></li>
+          <li><span class="ck">✓</span><span><b>La matriz A</b> tiene filas de punto (3 pesos que suman 1) y filas de área (peso 1/H = promedio). → §02, figura.</span></li>
+          <li><span class="ck">✓</span><span><b>«Dentro» vs «fuera» del modelo</b>: <i>melding</i>/matriz A propagan incertidumbre; el plug-in la fija. → §02.</span></li>
+          <li><span class="ck">✓</span><span><b>En INLA-SPDE estándar las covariables deben estar rellenas en cada punto de la respuesta antes de ajustar.</b> → §02.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 MECANISMO COMÚN ============ -->
+<section id="s2">
+  <div class="wrap col">
+    <p class="kicker">02 · Mecanismo común</p>
+    <h2>El motor de las tres obras: campo SPDE + matriz de proyección A</h2>
+    <p>Las tres asumen una <strong>superficie continua invisible</strong> (un campo gaussiano Matérn
+      <span class="formula">S(x)</span>) bajo los datos, estimada solo en los <strong>vértices</strong> de
+      una malla triangular. La <strong>matriz A</strong> traduce esos vértices a cualquier observación.
+      La clave es que <strong>una fila de A cambia según el soporte del dato</strong>:</p>
+  </div>
+
+  <div class="wrap col">
+    <figure>
+      <div class="figcard">
+        <svg viewBox="0 0 760 250" role="img" aria-label="Tres tipos de fila de la matriz A">
+          <text x="20" y="22" class="t-labb">(a) punto sobre un vértice</text>
+          <polygon points="70,55 185,55 130,140 45,140" fill="none" class="s-line" stroke-width="1.2"/>
+          <line x1="70" y1="55" x2="130" y2="140" class="s-line" stroke-width="1.2"/>
+          <g class="fill-tfm" opacity="0.45"><circle cx="70" cy="55" r="4"/><circle cx="185" cy="55" r="4"/><circle cx="130" cy="140" r="4"/><circle cx="45" cy="140" r="4"/></g>
+          <circle cx="70" cy="55" r="8" class="fill-mor"/>
+          <text x="30" y="170" class="t-mono">1 peso = 1</text>
+          <text x="30" y="188" class="t-mono">(el resto, 0)</text>
+
+          <text x="290" y="22" class="t-labb">(b) punto dentro de un triángulo</text>
+          <polygon points="305,55 435,65 355,150" fill="var(--mor)" opacity="0.10"/>
+          <polygon points="305,55 435,65 355,150" fill="none" class="stroke-mor" stroke-width="1.4"/>
+          <g class="fill-tfm"><circle cx="305" cy="55" r="5"/><circle cx="435" cy="65" r="5"/><circle cx="355" cy="150" r="5"/></g>
+          <circle cx="362" cy="92" r="7" class="fill-mor"/>
+          <g class="stroke-mor" stroke-width="1" stroke-dasharray="3 3"><line x1="362" y1="92" x2="305" y2="55"/><line x1="362" y1="92" x2="435" y2="65"/><line x1="362" y1="92" x2="355" y2="150"/></g>
+          <text x="290" y="170" class="t-mono">3 pesos = subtriángulos,</text>
+          <text x="290" y="188" class="t-mono">suman 1</text>
+
+          <text x="560" y="22" class="t-labb">(c) un ÁREA entera</text>
+          <g class="s-line" stroke-width="0.8" fill="none" opacity="0.7">
+            <line x1="545" y1="50" x2="740" y2="50"/><line x1="545" y1="90" x2="740" y2="90"/><line x1="545" y1="130" x2="740" y2="130"/>
+            <line x1="585" y1="42" x2="585" y2="150"/><line x1="645" y1="42" x2="645" y2="150"/><line x1="705" y1="42" x2="705" y2="150"/>
+          </g>
+          <rect x="565" y="58" width="150" height="82" rx="4" fill="var(--mor)" opacity="0.12" class="stroke-mor" stroke-width="1.6"/>
+          <g class="fill-mor"><circle cx="585" cy="90" r="4.5"/><circle cx="645" cy="90" r="4.5"/><circle cx="705" cy="90" r="4.5"/><circle cx="585" cy="130" r="4.5"/><circle cx="645" cy="130" r="4.5"/><circle cx="705" cy="130" r="4.5"/></g>
+          <text x="560" y="170" class="t-mono">cada vértice interior</text>
+          <text x="560" y="188" class="t-mono">pesa 1/H → PROMEDIO</text>
+
+          <text x="20" y="225" class="t-mono">A = [ 0  1  0 … ]   ·   [ T₁/ΣT  T₂/ΣT  T₃/ΣT … ]   ·   [ 1/H  1/H … 1/H  0 ]</text>
+          <text x="20" y="244" class="t-lab">La malla no cambia; la escala de agregación se define en la fila de A.</text>
+        </svg>
+      </div>
+      <figcaption><b>La matriz A, corazón del método</b> (Fig. 2 de Alahmadi &amp; Moraga). <b>(a)</b>
+        punto sobre vértice → peso 1. <b>(b)</b> punto dentro de un triángulo → 3 pesos baricéntricos que
+        suman 1. <b>(c)</b> área → todos los vértices interiores con peso 1/H, lo que equivale a
+        <b>promediar la superficie sobre el área</b>. He &amp; Wong usan la misma idea con
+        <span class="mono">block.rescale="sum"</span>.</figcaption>
+    </figure>
+
+    <h4>«Dentro» del modelo vs. «fuera» (plug-in)</h4>
+    <p>Esta distinción explica casi todas las diferencias entre las tres obras:</p>
+    <ul>
+      <li><strong>Dentro (melding / matriz A):</strong> el valor del área es una <strong>fórmula sobre el
+        campo</strong> que INLA está estimando (<span class="formula">0.25·s₃ + 0.25·s₄ + …</span>). Como
+        el campo tiene incertidumbre, esta <strong>se propaga</strong>. Es lo que hacen los dos papers para
+        los datos <strong>areales de la respuesta</strong>.</li>
+      <li><strong>Fuera (plug-in):</strong> se calcula <strong>un número fijo antes</strong> de ajustar
+        (una media ponderada, una interpolación) y se mete como dato exacto. La incertidumbre de ese paso
+        <strong>no se propaga</strong>. Es lo que hacen <strong>ambos papers y el TFM con las covariables
+        desalineadas</strong>.</li>
+    </ul>
+
+    <div class="keypoint">
+      <span class="lbl">Punto que se aclaró</span>
+      <p>En INLA-SPDE estándar (efectos fijos), <strong>cada covariable debe tener un valor en cada punto
+        de la respuesta antes de ajustar</strong> — medido o interpolado. El modelo solo estima por su
+        cuenta el <strong>campo espacial</strong> (vía A); las covariables hay que dárselas ya alineadas.
+        Por eso el TFM interpola el clima con IDW y asigna el tráfico por polígono antes de modelar.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 COMPARACIÓN ============ -->
+<section id="s3">
+  <div class="wrap">
+    <div class="col">
+      <p class="kicker">03 · Comparación</p>
+      <h2>Las tres obras, lado a lado</h2>
+      <p>Todas comparten el motor (campo Matérn-SPDE + INLA). Se diferencian en qué misalignment atacan y
+        con qué herramienta.</p>
+    </div>
+
+    <div class="tablecard">
+      <table class="cmp">
+        <thead>
+          <tr>
+            <th class="rowlabel">Dimensión</th>
+            <th class="hw">He &amp; Wong (2021)</th>
+            <th class="mor">Alahmadi &amp; Moraga (2025)</th>
+            <th class="tfm">Mi TFM (NO₂ Madrid)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="rowlabel">Dominio</td>
+            <td>Clorofila-a en un lago (teledetección)</td>
+            <td>Malaria, PM2.5 y cáncer de pulmón (salud + ambiente)</td>
+            <td>NO₂ en Madrid (calidad del aire)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Respuesta y soporte</td>
+            <td>Clorofila: <strong>puntos (in-situ) + áreas (satélite)</strong></td>
+            <td>Malaria/PM2.5: <strong>puntos + áreas</strong>; cáncer: <strong>áreas</strong></td>
+            <td><span class="mono">log(NO₂+1)</span>: <strong>puntos</strong> (24 estaciones)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Covariables y soporte</td>
+            <td>Tendencia lon/lat, viento, Tª aire, Tª superficie (co-localizadas)</td>
+            <td>Altitud (ráster); nitrato NO₃⁻ (puntos → área)</td>
+            <td>Clima (puntos, otras estaciones) + tráfico (áreas)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Tipo de misalignment</td>
+            <td><span class="pill a">A</span> en la respuesta</td>
+            <td><span class="pill a">A</span> y <span class="pill b">B1</span> (los dos)</td>
+            <td><span class="pill b">B2</span> + <span class="pill b">B3</span> (respuesta ↔ covariable)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Mecanismo para datos areales</td>
+            <td>Matriz A con <strong>promediado por bloque</strong> (<span class="mono">block.rescale="sum"</span>)</td>
+            <td>Matriz A con <strong>filas de área</strong> (peso 1/H)</td>
+            <td>Asignación por <strong>polígono</strong> (tráfico)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Covariable desalineada</td>
+            <td>— (medidas en las mismas localizaciones)</td>
+            <td>Media ponderada por <strong>población</strong> (plug-in)</td>
+            <td><strong>IDW</strong> por distancia + polígono (plug-in)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">¿Alineación dentro o fuera?</td>
+            <td><strong>Dentro</strong> (fusión conjunta)</td>
+            <td>Respuesta: <strong>dentro</strong> · covariable: <strong>fuera</strong></td>
+            <td><strong>Fuera</strong> (preprocesado) + SPDE</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Verosimilitud</td>
+            <td>2× Gaussiana + término de <strong>sesgo</strong> entre fuentes</td>
+            <td>Normal / <strong>Binomial</strong> / Poisson (familia exponencial)</td>
+            <td>Gaussiana</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Estructura espacial</td>
+            <td>Campo SPDE Matérn compartido</td>
+            <td>Campo SPDE Matérn (+ <strong>BYM</strong> en el caso areal)</td>
+            <td>Campo SPDE Matérn (<span class="mono">α=2, ν=1</span>)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Dimensión temporal</td>
+            <td><strong>Sí</strong> · AR(1)</td>
+            <td>No (estático; citado como extensión futura)</td>
+            <td><strong>Sí</strong> · AR(1) (horario/diario)</td>
+          </tr>
+          <tr>
+            <td class="rowlabel">Propagación de incertidumbre</td>
+            <td><strong>Sí</strong> (fusión conjunta)</td>
+            <td>Sí en la respuesta · no en la covariable</td>
+            <td>No en la alineación (plug-in)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 MAPA DE COBERTURA ============ -->
+<section id="s4">
+  <div class="wrap">
+    <div class="col">
+      <p class="kicker">04 · Posicionamiento</p>
+      <h2>Mapa de cobertura: qué tipo resuelve cada obra</h2>
+      <p>Cruzando la taxonomía (§01) con las tres obras se ve algo importante: <strong>entre las tres
+        cubren todo el espectro</strong>, y el TFM ocupa una rama propia (B2/B3, respuesta puntual) que
+        ninguno de los dos papers trabaja en primer plano.</p>
+    </div>
+
+    <div class="cov tablecard">
+      <table class="covgrid">
+        <thead>
+          <tr>
+            <th class="type">Tipo de misalignment</th>
+            <th class="colhw">He &amp; Wong</th>
+            <th class="colmor">Alahmadi &amp; Moraga</th>
+            <th class="coltfm">Mi TFM</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="first"><b><span class="pill a">A</span> &nbsp;En la respuesta</b><span>respuesta en puntos + áreas</span></td>
+            <td class="yes hw">Sí<span class="ex">clorofila in-situ + satélite</span></td>
+            <td class="yes mor">Sí<span class="ex">malaria, PM2.5</span></td>
+            <td class="no">no aplica<span class="ex">respuesta solo puntos</span></td>
+          </tr>
+          <tr>
+            <td class="first"><b><span class="pill b">B1</span> &nbsp;Y areal ↔ X puntos</b><span>agregar covariable (up-scaling)</span></td>
+            <td class="no">—</td>
+            <td class="yes mor">Sí<span class="ex">cáncer ↔ nitrato (media por población)</span></td>
+            <td class="no">—</td>
+          </tr>
+          <tr>
+            <td class="first"><b><span class="pill b">B2</span> &nbsp;Y puntos ↔ X areal</b><span>desagregar covariable (downscaling)</span></td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="yes tfm">Sí<span class="ex">NO₂ ↔ tráfico por barrio (polígono)</span></td>
+          </tr>
+          <tr>
+            <td class="first"><b><span class="pill b">B3</span> &nbsp;Y puntos ↔ X puntos (otro sitio)</b><span>interpolar covariable (lateral)</span></td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="yes tfm">Sí<span class="ex">NO₂ ↔ clima (IDW)</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 05 DÓNDE ENCAJA EL TFM ============ -->
+<section id="s5">
+  <div class="wrap col">
+    <p class="kicker">05 · Conclusión</p>
+    <h2>Dónde encaja mi TFM</h2>
+    <p>La comparación deja una posición clara y defendible para la memoria:</p>
+    <ul>
+      <li><strong>Comparte el motor</strong> con ambos papers: campo gaussiano Matérn aproximado por SPDE e
+        inferencia con INLA. No es un método distinto, es <strong>la misma familia</strong>.</li>
+      <li><strong>Su misalignment es de Tipo B</strong> (entre respuesta y covariables), el mismo escenario
+        que el <strong>caso 3 (cáncer ↔ nitrato) de Moraga</strong>. La forma de resolverlo también
+        coincide: una <strong>media ponderada calculada fuera del modelo</strong> (plug-in). La única
+        diferencia es el peso — Moraga pesa por <strong>población</strong>, el TFM por
+        <strong>distancia (IDW)</strong>. Es, por tanto, una práctica <strong>avalada por literatura
+        publicada</strong>.</li>
+      <li><strong>Añade la dimensión temporal AR(1)</strong>, que Moraga deja explícitamente como línea
+        futura y que He &amp; Wong sí incorporan. Es un punto a favor del TFM frente al marco estático de
+        Moraga.</li>
+      <li><strong>No necesita</strong> lo más sofisticado de los papers (la fusión de dos fuentes de He
+        &amp; Wong, o las filas de área de A de Moraga) porque <strong>su respuesta es puntual</strong>: no
+        hay datos areales de NO₂ que fusionar.</li>
+    </ul>
+
+    <div class="keypoint">
+      <span class="lbl">Limitación honesta (compartida con Moraga)</span>
+      <p>Tratar la covariable interpolada como conocida (regresor generado) <strong>no propaga su
+        incertidumbre</strong>. El propio paper de Moraga reconoce esta misma limitación en su media
+        ponderada. La <strong>línea futura natural</strong> es resolver la covariable <em>dentro</em> del
+        modelo —modelándola como su propio campo latente, o el tráfico como fila de área de A— para que la
+        incertidumbre fluya, tal como sugieren ambos trabajos.</p>
+    </div>
+
+    <p>En una frase para presentar: <strong>mi TFM aplica el mismo marco INLA-SPDE de estos dos papers de
+      referencia a un caso de misalignment respuesta ↔ covariable (Tipo B) en la contaminación por NO₂,
+      resolviéndolo con la misma estrategia plug-in que Moraga y añadiendo una estructura espacio-temporal
+      AR(1) que su marco no contempla.</strong></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b>Referencias.</b> Paper 1: S. He y S. W. K. Wong, <em>«Spatio-temporal data fusion for the
+      analysis of in situ and remote sensing data using the INLA-SPDE approach»</em>. · Paper 2:
+      H. Alahmadi y P. Moraga (2025), <em>«Bayesian modelling for the integration of spatially misaligned
+      health and environmental data»</em>, <i>Stoch. Environ. Res. Risk Assess.</i> 39:1485–1499. · Método
+      base: Moraga et al. (2017); Fuentes &amp; Raftery (2005); Lindgren, Rue &amp; Lindström (2011). ·
+      TFM: <b>METODOLOGIA_INLA_SPDE_TESIS.md</b>, <b>explicacion_fases_modelo.md</b>,
+      <b>simulacion_interpolacion_clima.R</b>.</p>
+  </div>
+</footer>

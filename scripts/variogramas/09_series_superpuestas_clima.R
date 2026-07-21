@@ -3,6 +3,50 @@
 # Compara visualmente todas las estaciones en cada variable meteorológica
 # Outputs: outputs/comparacion_estaciones_clima/
 # ==============================================================================
+QUÉ HACE:
+#
+# - Carga las observaciones meteorológicas diarias de 2025.
+# - Analiza las siguientes variables:
+#     · Temperatura.
+#     · Humedad relativa.
+#     · Presión barométrica.
+#     · Radiación solar.
+#     · Velocidad del viento.
+#     · Precipitaciones.
+#
+# Para cada variable meteorológica:
+#
+# - Elimina las observaciones ausentes.
+# - Identifica las estaciones con información disponible.
+# - Superpone las series temporales de todas las estaciones.
+# - Utiliza un color diferente para cada estación.
+# - Añade franjas y separadores mensuales.
+# - Genera un archivo PNG independiente.
+#
+# FINALIDAD PARA EL TFM:
+#
+# Este script permite evaluar visualmente la similitud de las mediciones entre
+# las diferentes estaciones meteorológicas.
+#
+# Sirve para comprobar:
+#
+# - Si las estaciones siguen un patrón temporal común.
+# - Qué variables presentan mayor variabilidad espacial.
+# - Si existen estaciones meteorológicas atípicas.
+# - Si aparecen cambios bruscos o posibles errores de medición.
+# - Si existen periodos con información incompleta.
+# - Si es razonable asignar los datos meteorológicos de una estación climática
+#   a una estación de calidad del aire próxima.
+#
+# Esta comprobación es importante para evaluar la calidad del emparejamiento
+# espacial entre los datos de contaminación y las variables meteorológicas.
+#
+# SALIDAS:
+#
+# outputs/comparacion_estaciones_clima/
+#
+# Se genera un PNG para cada variable meteorológica.
+
 
 library(data.table)
 library(ggplot2)
