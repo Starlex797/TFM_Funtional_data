@@ -1,17 +1,27 @@
-# Ignorar archivos de datos pesados
+# Sesiones y configuración local de R/RStudio
 .Rhistory
-.RData
+.RData*
 .Ruserdata
+.Rproj.user/
+.positai/
+
+# Datos pesados
+data/
 *.zip
 *.csv
 *.rds
 
-# Ignorar carpetas de datos completas
-data/raw/
-data/processed/
-data/
-.RDataTmp
-.Rproj.user
+# Registros generados durante las ejecuciones
+outputs/logs/*
+!outputs/logs/.gitkeep
 .positai
-echo .RData* 
-echo .Rhistory 
+#Carpetas que no quiero añadir al repositorio
+outputs/analysis/
+outputs/archive/
+outputs/figures/
+outputs/tables/
+outputs/logs/
+outputs/models/
+outputs/reports/
+report/
+docs/
