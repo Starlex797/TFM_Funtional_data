@@ -1,0 +1,30 @@
+# Normalizacion de finales de linea: el repositorio guarda siempre LF.
+# Independiza el comportamiento del core.autocrlf de cada maquina.
+* text=auto
+
+# Codigo y datos en texto plano: LF tambien en la copia de trabajo
+*.R      text eol=lf
+*.r      text eol=lf
+*.Rmd    text eol=lf
+*.csv    text eol=lf
+*.md     text eol=lf
+*.json   text eol=lf
+*.Rproj  text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# Binarios: Git no debe tocarlos nunca
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.pdf    binary
+*.rds    binary
+*.RData  binary
+*.xlsx   binary
+*.docx   binary
+*.tif    binary
+*.tiff   binary
+*.shp    binary
+*.dbf    binary
+*.shx    binary
+*.nc     binary

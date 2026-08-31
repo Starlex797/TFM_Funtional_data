@@ -13,13 +13,13 @@ source(here("R", "cleaning", "cleaning_functions.R"))
 # Years to be processed
 # ==============================================================================
 
-anios_procesar <- c(2019)
+anios_procesar <- 2019:2025
 
 # Sufijo de la salida. Se escribe en ficheros NUEVOS para no pisar los que ya
 # existen: los originales (sin sufijo) siguen siendo los que consumen los
 # scripts actuales hasta que la nueva versión esté validada.
 # Poner "" para volver a escribir sobre los originales.
-SUFIJO <- "2"
+SUFIJO <- "4"
 
 # Con TRUE el script se detiene si el fichero de destino ya existe, en lugar de
 # sobrescribirlo sin avisar.
@@ -44,6 +44,26 @@ anios_ok <- character(0)
 # processing the next year if an error occurs.
 
 for (anio in anios_procesar) {
+  ruta_h <- here("data", "processed", "Clima", "horario", paste0("meteo_madrid_", anio, "_horario", SUFIJO, ".rds"))
+  ruta_d <- here("data", "processed", "Clima", "diario", paste0("meteo_madrid_", anio, "_diario", SUFIJO, ".rds"))
+  ruta_m <- here("data", "processed", "Clima", "mensual", paste0("meteo_madrid_", anio, "_mensual", SUFIJO, ".rds"))
+
+  # Una version anual completa no se recalcula. Esto permite reanudar los siete
+  # anos sin sobrescribir resultados ya validados (por ejemplo, 2019 v4).
+  destinos <- c(ruta_h, ruta_d, ruta_m)
+  if (all(file.exists(destinos))) {
+    cat("\nSaltando", anio, ": los tres ficheros ya existen.\n")
+    anios_ok <- c(anios_ok, as.character(anio))
+    next
+  }
+  if (PROTEGER_EXISTENTES && any(file.exists(destinos))) {
+    stop(
+      "Salida parcial para ", anio, ": ",
+      paste(basename(destinos[file.exists(destinos)]), collapse = ", "),
+      "\nElimina o renombra esos ficheros, o usa otro SUFIJO."
+    )
+  }
+
   resultado <- tryCatch(
     procesar_anio_meteo(anio, carpeta_base_meteo, ruta_estaciones),
     error = function(e) {
@@ -56,10 +76,6 @@ for (anio in anios_procesar) {
 
   # Save the processed data to RDS files
   cat("\n💾 Guardando archivos del año", anio, "...\n")
-
-  ruta_h <- here("data", "processed", "Clima", "horario", paste0("meteo_madrid_", anio, "_horario", SUFIJO, ".rds"))
-  ruta_d <- here("data", "processed", "Clima", "diario", paste0("meteo_madrid_", anio, "_diario", SUFIJO, ".rds"))
-  ruta_m <- here("data", "processed", "Clima", "mensual", paste0("meteo_madrid_", anio, "_mensual", SUFIJO, ".rds"))
 
   if (PROTEGER_EXISTENTES) {
     ya_existen <- Filter(file.exists, c(ruta_h, ruta_d, ruta_m))
@@ -97,6 +113,3 @@ if (length(anios_ok) == 0) {
 }
 
 
-horario_2019 <- readRDS(here("data", "processed", "Clima", "horario", "meteo_madrid_2019_horario2.rds"))
-view(horario_2019)
-# ===============================================================================

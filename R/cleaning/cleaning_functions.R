@@ -285,7 +285,7 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
   dt <- dt[ESTACION %in% estaciones_objetivo]
   
   # Exclude variables that are not relevant for our analysis (e.g., wind direction).
-  vars_excluir <- c("dir.viento")
+  vars_excluir <- c("dir.viento","radiacion.uv")
   dt <- dt[!tolower(MAGNITUD) %in% vars_excluir]
  
   
@@ -357,7 +357,17 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
 # ==============================================================================
 
 # Estados posibles de una celda climática, en orden de calidad decreciente.
-ESTADOS_CLIMA <- c("OK", "IMPUTADO", "FALLO", "SIN_SENSOR")
+ESTADOS_CLIMA <- c("OK", "IMPUTADO", "FALLO", "AUSENTE", "SIN_SENSOR")
+
+# Proporción de horas imputadas a partir de la cual un periodo agregado (día o
+# mes) se considera IMPUTADO.
+#
+# NO se usa "alguna hora imputada": ese criterio se acumula al subir de escala.
+# Con un 0,1 % de horas imputadas en 2019, encadenar "algún" hora -> día y
+# "algún" día -> mes producía un 2,5 % de días y un 36,5 % de meses marcados
+# como imputados. El dato es el mismo; lo que se degrada es el indicador. Por
+# eso cada escala cuenta SUS PROPIAS horas y ninguna hereda de la anterior.
+UMBRAL_IMPUTADO_CLIMA <- 0.3
 
 inventario_sensores_clima <- function(dt_ubica) {
 
@@ -409,6 +419,7 @@ inventario_sensores_clima <- function(dt_ubica) {
 imputar_na_horario <- function(dt_horario,
                                cols_clima = NULL, # It is optional
                                maxgap     = 3L,   # maxgap is the maximum number of consecutive NA
+                               usar_vecino = FALSE,
                                marcar_imputados = FALSE,
                                marcar_estado = FALSE,
                                inventario = NULL) {
@@ -460,6 +471,10 @@ imputar_na_horario <- function(dt_horario,
   #
   # na_inicial es la foto de qué celdas estaban vacías ANTES de imputar esa
   # variable; dt mantiene un orden de filas fijo, así que sigue alineada.
+  # Las filas anadidas para completar la rejilla vienen marcadas; si el llamante
+  # no aporta la columna, se asume que todas las filas son reales.
+  if (!"fila_ausente" %in% names(dt)) dt[, fila_ausente := FALSE]
+
   asignar_estado <- function(v, na_inicial) {
 
     if (!marcar_estado) return(invisible(NULL))
@@ -482,10 +497,13 @@ imputar_na_horario <- function(dt_horario,
 
     tiene <- !dt$ESTACION %in% est_sin_sensor
 
+    # SIN_SENSOR manda sobre AUSENTE: si la estacion no tiene el aparato, lo
+    # informativo es eso, no que falte la fila de ese dia.
     dt[, (paste0(v, "_estado")) := factor(
-      fifelse(!tiene,          "SIN_SENSOR",
-      fifelse(!na_inicial,     "OK",
-      fifelse(!is.na(get(v)),  "IMPUTADO", "FALLO"))),
+      fifelse(!tiene,                 "SIN_SENSOR",
+      fifelse(fila_ausente %in% TRUE, "AUSENTE",
+      fifelse(!na_inicial,            "OK",
+      fifelse(!is.na(get(v)),         "IMPUTADO", "FALLO")))),
       levels = ESTADOS_CLIMA
     )]
 
@@ -507,7 +525,12 @@ imputar_na_horario <- function(dt_horario,
 
   if (!is.null(inventario)) inventario <- as.data.table(inventario)
 
-  cat("⏳ Imputación de NAs horarios (2 pasos)...\n")
+  cat(if (isTRUE(usar_vecino))
+        "⏳ Imputación de NAs horarios (lineal + estación más cercana)...
+"
+      else
+        "⏳ Imputación de NAs horarios (solo interpolación lineal intra-estación)...
+")
   
   # Loop over each climate variable to impute missing values
   for (v in cols_clima) {
@@ -541,9 +564,29 @@ imputar_na_horario <- function(dt_horario,
     na_post_interp <- sum(is.na(dt[[v]]))
     n_interp <- na_antes - na_post_interp
 
-    # --- Step 2: fallback — nearest station with valid value at same FECHA × HORA ---
-    # For each timestamp still with NA, take the value of the geographically
-    # closest station (by Euclidean distance in km) that has a non-NA reading.
+    # --- Paso 2 (DESACTIVADO POR DEFECTO): estacion mas cercana -------------
+    # Copia el valor de la estacion valida mas proxima en el mismo instante.
+    #
+    # POR QUE ESTA DESACTIVADO. Esto NO es imputacion temporal: es una
+    # interpolacion espacial 1-NN sin ponderar por distancia, hecha ANTES de la
+    # interpolacion espacial buena (IDW/kriging) que resuelve el
+    # desalineamiento. Interpolar dos veces en el espacio tiene tres efectos
+    # indeseables para un modelo SPDE:
+    #   1. Doble conteo: si la estacion donante tambien esta entre los vecinos
+    #      del IDW, su valor entra dos veces en la media ponderada.
+    #   2. Validacion circular: un LOOCV sobre celdas rellenadas por 1-NN
+    #      favorece artificialmente a 1-NN e IDW frente al kriging.
+    #   3. Correlacion espacial fabricada: copiar entre vecinos sesga al alza el
+    #      rango espacial que el SPDE trata precisamente de estimar.
+    #
+    # Y lo que se gana es poco: a escala DIARIA el umbral del 30 % de NA ya
+    # absorbe los huecos (se pierden 1-3 dias al ano). El coste es mayor solo a
+    # escala horaria en presion y radiacion, que tienen 8 estaciones frente a un
+    # umbral IDW de 7.
+    #
+    # Se conserva tras el argumento usar_vecino para poder reactivarlo y
+    # comparar (p. ej. el rango espacial posterior con y sin este paso).
+    if (isTRUE(usar_vecino)) {
     
     # We create a table with the coordinates of the stations that measure this variable, 
     # to avoid recalculating distances for each timestamp.
@@ -592,6 +635,8 @@ imputar_na_horario <- function(dt_horario,
       }
     }
     
+    }  # fin de if (isTRUE(usar_vecino))
+
     # After both steps, we count the remaining NAs for this variable and print 
     # a summary of the imputation process.
     na_post_spatial <- sum(is.na(dt[[v]]))
@@ -603,8 +648,15 @@ imputar_na_horario <- function(dt_horario,
 
     asignar_estado(v, na_inicial)
 
-    cat(sprintf("   %-22s | antes: %6d NA → interp: -%d, est. cercana: -%d → quedan: %d NA\n",
-                v, na_antes, n_interp, n_spatial, na_post_spatial))
+    if (isTRUE(usar_vecino)) {
+      cat(sprintf("   %-22s | antes: %6d NA → interp: -%d, est. cercana: -%d → quedan: %d NA
+",
+                  v, na_antes, n_interp, n_spatial, na_post_spatial))
+    } else {
+      cat(sprintf("   %-22s | antes: %6d NA → interp lineal: -%d → quedan: %d NA
+",
+                  v, na_antes, n_interp, na_post_spatial))
+    }
   }
 
   dt[, HORA_NUM := NULL]
@@ -682,13 +734,66 @@ cargar_datos_metereo_anual <- function(anio, carpeta_base) {
 # Function to process meteorological data for a given year
 # ==============================================================================
 
+# ==============================================================================
+# Estado de un periodo agregado (día o mes) a partir de las horas que lo componen
+# ==============================================================================
+# Recibe el horario ya etiquetado y devuelve una tabla con una columna
+# <variable>_estado por cada variable climática, resumida al periodo indicado.
+#
+#   SIN_SENSOR  todas las horas del periodo carecen de aparato
+#   FALLO       faltan >= umbral_na de las horas -> el agregado sale NA
+#   IMPUTADO    >= UMBRAL_IMPUTADO_CLIMA de las horas CON dato son imputadas
+#   OK          resto
+#
+# Las dos escalas agregadas cuentan horas directamente, sin encadenarse entre
+# sí, para que el criterio no se acumule.
+estado_periodo_clima <- function(dt_horario, cols_clima, cols_grupo,
+                                 umbral_na = 0.3) {
+
+  cols_estado <- intersect(paste0(cols_clima, "_estado"), names(dt_horario))
+  if (length(cols_estado) == 0) return(NULL)
+
+  dt_horario[, lapply(.SD, function(s) {
+    s       <- as.character(s)
+    n       <- length(s)
+    n_sin   <- sum(s == "SIN_SENSOR")
+    n_aus   <- sum(s == "AUSENTE")
+    n_fallo <- sum(s == "FALLO")
+    n_imp   <- sum(s == "IMPUTADO")
+    n_ok    <- sum(s == "OK")
+
+    if (n_sin == n) {
+      "SIN_SENSOR"
+    } else if (n_aus == n) {
+      "AUSENTE"
+    } else if ((n_fallo + n_aus + n_sin) / n >= umbral_na) {
+      "FALLO"
+    } else if (n_imp / max(n_ok + n_imp, 1L) >= UMBRAL_IMPUTADO_CLIMA) {
+      "IMPUTADO"
+    } else {
+      "OK"
+    }
+  }), by = cols_grupo, .SDcols = cols_estado]
+}
+
+
 procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
   
   # 1. Load raw data
   cat("⏳ Cargando datos...\n")
   dt_ubicaciones <- as.data.table(
-    read.csv(ruta_estaciones, sep = ";", fileEncoding = "latin1")
+    read.csv(ruta_estaciones, sep = ";")
   )
+
+  # En Windows, forzar fileEncoding = "latin1" puede truncar silenciosamente
+  # este CSV en la primera estacion cuando la locale nativa ya es CP1252. Una
+  # lectura parcial haria que todo el ano se redujera a una sola estacion.
+  if (nrow(dt_ubicaciones) < 20L) {
+    stop(
+      "El inventario de estaciones solo contiene ", nrow(dt_ubicaciones),
+      " filas; revisa la codificacion de ", basename(ruta_estaciones), "."
+    )
+  }
 
   # Inventario oficial de sensores: permite marcar el hueco ESTRUCTURAL antes de
   # imputar, en lugar de deducirlo después a partir de los NA.
@@ -705,9 +810,41 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
   # Setdiff is used to exclude the identifier columns from the list of climate variable columns.
   cols_clima <- setdiff(
     names(datos_horarios),
-    c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km", "FECHA", "HORA")
+    c("ESTACION", "LONGITUD", "LATITUD", "X_km", "Y_km", "FECHA", "HORA",
+      "fila_ausente")
   )
   
+  # 2a-bis. Rejilla completa estacion x dia x hora ---------------------------
+  # El proveedor no publica fila cuando la estacion esta caida el dia entero:
+  # no escribe 24 registros vacios, sencillamente no escribe nada. Esos dias no
+  # son NA, no existen, y desaparecen del denominador sin dejar rastro. Aqui se
+  # materializan como filas con las variables a NA.
+  #
+  # El right join contra la rejilla conserva las filas presentes y crea las que
+  # faltan: no hace falta anti-join ni rbind.
+  datos_horarios[, fila_ausente := FALSE]
+
+  rejilla <- CJ(
+    ESTACION = unique(datos_horarios$ESTACION),
+    FECHA    = seq(as.Date(paste0(anio, "-01-01")),
+                   as.Date(paste0(anio, "-12-31")), by = "day"),
+    HORA     = unique(datos_horarios$HORA)
+  )
+
+  datos_horarios <- datos_horarios[rejilla, on = .(ESTACION, FECHA, HORA)]
+  datos_horarios[is.na(fila_ausente), fila_ausente := TRUE]
+
+  # Las coordenadas son constantes por estacion y se recuperan de sus otras
+  # filas. Sin esto, la agregacion diaria -que agrupa por estacion Y
+  # coordenadas- crearia grupos aparte para las filas nuevas, en silencio.
+  cols_coord <- c("LONGITUD", "LATITUD", "X_km", "Y_km")
+  datos_horarios[, (cols_coord) := lapply(.SD, function(x) x[!is.na(x)][1L]),
+                 by = ESTACION, .SDcols = cols_coord]
+
+  cat(sprintf("   Rejilla completada: +%d filas (%d dias-estacion ausentes)\n",
+              sum(datos_horarios$fila_ausente),
+              sum(datos_horarios$fila_ausente) / uniqueN(datos_horarios$HORA)))
+
   # 2b. Imputation of NAs in hourly data
   cat("⏳ Imputando NAs horarios...\n")
   datos_horarios <- imputar_na_horario(datos_horarios,
@@ -765,22 +902,25 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
   # deje de ser una medida pura.
   if (length(cols_estado) > 0) {
 
-    estado_diario <- datos_horarios[, lapply(.SD, function(s) {
-      s <- as.character(s)
-      if (all(s == "SIN_SENSOR")) "SIN_SENSOR"
-      else if (any(s == "IMPUTADO")) "IMPUTADO"
-      else "OK"
-    }), by = by_diario, .SDcols = cols_estado]
+    estado_diario <- estado_periodo_clima(datos_horarios, cols_clima,
+                                          cols_grupo = by_diario,
+                                          umbral_na  = 0.3)
 
     datos_diarios <- merge(datos_diarios, estado_diario,
                            by = by_diario, all.x = TRUE)
 
-    # Si la agregación descartó el día por superar el umbral de NA, el valor
-    # sale NA y el estado pasa a FALLO, salvo que no hubiera sensor.
+    # Red de seguridad: si la agregación descartó el día por umbral de NA, el
+    # valor sale NA y el estado tiene que ser FALLO aunque el recuento de horas
+    # no lo hubiera detectado (p. ej. por redondeo en el umbral).
+    #
+    # SIN_SENSOR y AUSENTE quedan fuera: en ambos el valor es NA por definición
+    # y ya están correctamente etiquetados. Sin esta excepción, un día entero
+    # ausente se reclasificaría como avería y se perderia la distincion.
     for (v in cols_clima) {
       ce <- paste0(v, "_estado")
       if (!ce %in% names(datos_diarios)) next
-      datos_diarios[is.na(get(v)) & get(ce) != "SIN_SENSOR", (ce) := "FALLO"]
+      datos_diarios[is.na(get(v)) & !get(ce) %in% c("SIN_SENSOR", "AUSENTE"),
+              (ce) := "FALLO"]
       set(datos_diarios, j = ce,
           value = factor(datos_diarios[[ce]], levels = ESTADOS_CLIMA))
     }
@@ -832,6 +972,30 @@ procesar_anio_meteo <- function(anio, carpeta_base, ruta_estaciones) {
     mens_media
   }
   
+  # Estado del dato mensual. Se calcula desde las HORAS del mes, no desde los
+  # estados diarios: encadenar día -> mes reintroduciría el efecto acumulativo.
+  if (length(cols_estado) > 0) {
+
+    horario_mes <- copy(datos_horarios)
+    horario_mes[, MES := format(FECHA, "%Y-%m")]
+
+    estado_mensual <- estado_periodo_clima(horario_mes, cols_clima,
+                                           cols_grupo = c(cols_grupo_m, "MES"),
+                                           umbral_na  = 0.3)
+
+    datos_mensuales <- merge(datos_mensuales, estado_mensual,
+                             by = c(cols_grupo_m, "MES"), all.x = TRUE)
+
+    for (v in cols_clima) {
+      ce <- paste0(v, "_estado")
+      if (!ce %in% names(datos_mensuales)) next
+      datos_mensuales[is.na(get(v)) & !get(ce) %in% c("SIN_SENSOR", "AUSENTE"),
+                (ce) := "FALLO"]
+      set(datos_mensuales, j = ce,
+          value = factor(datos_mensuales[[ce]], levels = ESTADOS_CLIMA))
+    }
+  }
+
   # We filter the monthly data to keep only the rows corresponding to the specified year.
   datos_mensuales <- datos_mensuales[substr(MES, 1, 4) == as.character(anio)]
   datos_mensuales[, ANO := anio]
@@ -1155,6 +1319,55 @@ agregar_trafico_mensual <- function(dt_diario_distrito,
 # It extracts the hour from fecha_hora and calculates the mean of intensity, occupancy,
 # and load for each district and neighborhood × date × hour combination.
 # It also counts the number of unique sensors contributing to each average.
+
+#-------------------------------------------------------------------------------
+# Rejilla horaria completa para los agregados de trafico por zona
+#-------------------------------------------------------------------------------
+# agregar_trafico_horario_zona() agrupa con by = .(zona, FECHA, HORA), y un "by"
+# SOLO crea grupos para las combinaciones presentes en los datos. Si ningun
+# sensor de un barrio reporta a las 03:00, esa hora no genera fila: no queda
+# como NA, sencillamente no existe, y desaparece de cualquier denominador.
+#
+# En 2019 esto afectaba a 852 horas del agregado por barrio y 64 del de
+# distrito, concentradas en la madrugada, cuando el trafico es minimo y los
+# sensores pueden no transmitir.
+#
+# Las filas anadidas llevan num_medidores = 0, que es el dato honesto (cero
+# sensores reportaron) y ademas sirve de indicador de fiabilidad por celda: hoy
+# una media apoyada en 28 sensores y otra en 1 entran al modelo con el mismo
+# peso, y con esta columna se pueden distinguir.
+#
+# Argumentos:
+#   dt        - agregado por zona (salida de agregar_trafico_horario_zona)
+#   col_zona  - "distrito" o "barrio"
+#   dias      - vector de fechas que debe cubrir la rejilla
+#
+# Devuelve el mismo data.table con las filas que faltaban y una columna ESTADO
+# de dos niveles: OK / AUSENTE. No hay FALLO porque la agregacion usa
+# mean(na.rm = TRUE) y nunca produce NA en las filas que si existen.
+completar_rejilla_trafico <- function(dt, col_zona, dias) {
+
+  dt <- as.data.table(dt)
+
+  rejilla <- CJ(zona = unique(dt[[col_zona]]), FECHA = dias, HORA = 1:24)
+  setnames(rejilla, "zona", col_zona)
+
+  dt[, fila_ausente := FALSE]
+  dt <- dt[rejilla, on = c(col_zona, "FECHA", "HORA")]
+  dt[is.na(fila_ausente), `:=`(fila_ausente = TRUE, num_medidores = 0L)]
+
+  # El barrio arrastra su distrito: en las filas nuevas hay que heredarlo para
+  # no romper la jerarquia barrio -> distrito.
+  if (col_zona == "barrio" && "distrito" %in% names(dt)) {
+    jer <- unique(dt[!is.na(distrito), .(barrio, distrito)])
+    dt[, distrito := jer$distrito[match(barrio, jer$barrio)]]
+  }
+
+  dt[, ESTADO := factor(fifelse(fila_ausente, "AUSENTE", "OK"),
+                        levels = c("OK", "AUSENTE"))]
+  dt[]
+}
+
 
 agregar_trafico_horario_zona <- function(dt_horario) {
 
