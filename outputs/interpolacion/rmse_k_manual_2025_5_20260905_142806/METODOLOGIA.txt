@@ -1,0 +1,19 @@
+Anio: 2025
+Escalas: horario, diario, mensual
+Metodo: retirar una ubicacion completa y predecir con las demas en el mismo instante.
+RMSE = raiz de la media de MSE por ubicacion; todas las ubicaciones pesan igual.
+Precipitacion: objetivo observado > 0.1 mm. Vecinos secos conservados.
+La evaluacion de lluvia es condicional: no evalua la deteccion de lluvia en periodos secos.
+Siempre cero es una referencia de error, no un interpolador candidato.
+Cobertura minima para el rango k (global y por ubicacion): 0.9
+El rango se limita por disponibilidad; no hay seleccion automatica de k ni de metodo.
+Todos los k dibujados se evaluan sobre exactamente la misma muestra.
+Mensual: doce periodos y exclusiones por imputacion pueden limitar k a 1.
+Solo estado OK, sin imputacion. En agregados se excluye cualquier periodo con horas imputadas.
+Trazabilidad horaria: C:/Users/HP/Desktop/Statistics for data science/TFM/Proyecto/TFM_Funtional_data/data/processed/Clima/horario/meteo_madrid_2025_horario5.rds
+MD5 horario: 9261440dd87486577969e295ee3508cf
+Los agregados no se recalculan. Pueden seguir siendo incompletos si el preprocesamiento los acepto.
+Colocalizados: media observada por ubicacion e instante; se retiran juntos.
+La seleccion posterior es exploratoria: el RMSE usado para elegir k no es una evaluacion independiente.
+No se ajustan ensambles, no se generan rankings ni se cruzan escalas en una tabla.
+Entrada sin modificar. Consultar README_comparacion_2025.md.

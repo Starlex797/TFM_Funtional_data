@@ -27,9 +27,9 @@ nombres_estaciones_aire <- c(
 #------------------------------------------------------------
 
 nombres_magnitudes_clima <- c(
-  "80" = "Radiacion Ultravioleta", "86" = "Humedad_Relativa", 
-  "81" = "Velocidad Viento",       "87" = "Presion Barométrica", 
-  "82" = "Dir.Viento",             "88" = "Radiación Solar", 
+  "80" = "Radiacion_Ultravioleta", "86" = "Humedad_Relativa", 
+  "81" = "Velocidad_Viento",       "87" = "Presion_Barometrica", 
+  "82" = "Direccion_Viento",             "88" = "Radiacion_Solar", 
   "83" = "Temperatura",            "89" = "Precipitaciones"
 )
 

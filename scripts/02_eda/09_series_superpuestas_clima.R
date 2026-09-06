@@ -58,53 +58,64 @@ library(here)
 
 cat("Cargando datos meteorológicos diarios 2025...\n")
 
-dt_meteo_d <- readRDS(here("data", "processed", "clima", "diario",
-                            "meteo_madrid_2025_diario.rds"))
+dt_meteo_d <- readRDS(here(
+  "data", "processed", "clima", "diario",
+  "meteo_madrid_2025_diario.rds"
+))
 
-cat(sprintf("  Filas: %d  ·  Estaciones: %d\n",
-            nrow(dt_meteo_d), uniqueN(dt_meteo_d$ESTACION)))
+cat(sprintf(
+  "  Filas: %d  ·  Estaciones: %d\n",
+  nrow(dt_meteo_d), uniqueN(dt_meteo_d$ESTACION)
+))
 
 # ==============================================================================
 # 2. DEFINICIÓN DE VARIABLES Y ETIQUETAS
 # ==============================================================================
 
 vars_info <- list(
-  list(col  = "Temperatura",
-       ylab = "Temperatura (°C)",
-       tit  = "Temperatura diaria",
-       file = "temp"),
-
-  list(col  = "Humedad_Relativa",
-       ylab = "Humedad relativa (%)",
-       tit  = "Humedad relativa diaria",
-       file = "humedad"),
-
-  list(col  = "Presion Barométrica",
-       ylab = "Presión barométrica (mbar)",
-       tit  = "Presión barométrica diaria",
-       file = "presion"),
-
-  list(col  = "Radiación Solar",
-       ylab = expression("Radiación solar (W/m"^2*")"),
-       tit  = "Radiación solar diaria",
-       file = "radiacion"),
-
-  list(col  = "Velocidad Viento",
-       ylab = "Velocidad del viento (m/s)",
-       tit  = "Velocidad del viento diaria",
-       file = "viento"),
-
-  list(col  = "Precipitaciones",
-       ylab = "Precipitaciones (mm)",
-       tit  = "Precipitaciones diarias",
-       file = "precipitacion")
+  list(
+    col = "Temperatura",
+    ylab = "Temperatura (°C)",
+    tit = "Temperatura diaria",
+    file = "temp"
+  ),
+  list(
+    col = "Humedad_Relativa",
+    ylab = "Humedad relativa (%)",
+    tit = "Humedad relativa diaria",
+    file = "humedad"
+  ),
+  list(
+    col = "Presion Barométrica",
+    ylab = "Presión barométrica (mbar)",
+    tit = "Presión barométrica diaria",
+    file = "presion"
+  ),
+  list(
+    col = "Radiación Solar",
+    ylab = expression("Radiación solar (W/m"^2 * ")"),
+    tit = "Radiación solar diaria",
+    file = "radiacion"
+  ),
+  list(
+    col = "Velocidad Viento",
+    ylab = "Velocidad del viento (m/s)",
+    tit = "Velocidad del viento diaria",
+    file = "viento"
+  ),
+  list(
+    col = "Precipitaciones",
+    ylab = "Precipitaciones (mm)",
+    tit = "Precipitaciones diarias",
+    file = "precipitacion"
+  )
 )
 
 # ==============================================================================
 # 3. DIRECTORIO DE SALIDA
 # ==============================================================================
 
-dir_salida <- here("outputs", "analysis", "comparacion_estaciones_clima")
+dir_salida <- here("outputs", "EDA", "Clima", "comparacion_estaciones_clima")
 dir.create(dir_salida, recursive = TRUE, showWarnings = FALSE)
 cat(sprintf("Directorio: %s\n\n", dir_salida))
 
@@ -113,8 +124,8 @@ cat(sprintf("Directorio: %s\n\n", dir_salida))
 # ==============================================================================
 
 # Delimitadores mensuales
-primeros_meses    <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "1 month")
-etiquetas_meses   <- format(primeros_meses, "%b")
+primeros_meses <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "1 month")
+etiquetas_meses <- format(primeros_meses, "%b")
 
 # Franjas alternadas de fondo
 franjas <- data.frame(
@@ -126,16 +137,16 @@ franjas <- data.frame(
 tema_sup <- function(base_size = 11) {
   theme_minimal(base_size = base_size) +
     theme(
-      plot.title       = element_text(face = "bold", size = 13),
-      plot.subtitle    = element_text(color = "gray40", size = 9.5),
-      plot.caption     = element_text(color = "gray55", size = 8),
-      legend.position  = "bottom",
-      legend.title     = element_text(face = "bold", size = 9),
-      legend.text      = element_text(size = 8),
+      plot.title = element_text(face = "bold", size = 13),
+      plot.subtitle = element_text(color = "gray40", size = 9.5),
+      plot.caption = element_text(color = "gray55", size = 8),
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold", size = 9),
+      legend.text = element_text(size = 8),
       legend.key.width = unit(1.2, "cm"),
       panel.grid.major.x = element_blank(),
-      panel.grid.minor   = element_blank(),
-      axis.text.x        = element_text(angle = 45, hjust = 1, size = 9)
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9)
     )
 }
 
@@ -144,10 +155,9 @@ tema_sup <- function(base_size = 11) {
 # ==============================================================================
 
 for (vi in vars_info) {
-
-  col  <- vi$col
+  col <- vi$col
   ylab <- vi$ylab
-  tit  <- vi$tit
+  tit <- vi$tit
   file <- vi$file
 
   # Filtrar estaciones con datos en esta variable
@@ -167,14 +177,17 @@ for (vi in vars_info) {
   )
 
   n_col_leyenda <- ifelse(n_est <= 6L, n_est,
-                   ifelse(n_est <= 12L, 3L, 4L))
+    ifelse(n_est <= 12L, 3L, 4L)
+  )
 
-  p <- ggplot(dt_var, aes(x = FECHA, y = VALOR,
-                           color = ESTACION, group = ESTACION)) +
+  p <- ggplot(dt_var, aes(
+    x = FECHA, y = VALOR,
+    color = ESTACION, group = ESTACION
+  )) +
 
     # Franjas de fondo
     geom_rect(
-      data        = franjas,
+      data = franjas,
       aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf),
       inherit.aes = FALSE,
       fill = "gray92", alpha = 0.6
@@ -188,7 +201,6 @@ for (vi in vars_info) {
 
     # Series superpuestas
     geom_line(linewidth = 0.55, alpha = 0.80, na.rm = TRUE) +
-
     scale_x_date(
       breaks       = primeros_meses,
       labels       = etiquetas_meses,
@@ -197,28 +209,35 @@ for (vi in vars_info) {
     ) +
     scale_y_continuous(expand = expansion(mult = c(0.03, 0.06))) +
     scale_color_manual(values = paleta, name = "Estación") +
-
     labs(
-      title    = paste0(tit, " \u2014 Madrid 2025"),
-      subtitle = sprintf("Todas las estaciones superpuestas  \u00b7  %d estaciones con datos",
-                         n_est),
-      x        = NULL,
-      y        = ylab,
-      caption  = "Cada l\u00ednea representa una estaci\u00f3n de medici\u00f3n  \u00b7  Datos diarios"
+      title = paste0(tit, " \u2014 Madrid 2025"),
+      subtitle = sprintf(
+        "Todas las estaciones superpuestas  \u00b7  %d estaciones con datos",
+        n_est
+      ),
+      x = NULL,
+      y = ylab,
+      caption = "Cada l\u00ednea representa una estaci\u00f3n de medici\u00f3n  \u00b7  Datos diarios"
     ) +
     tema_sup() +
-    guides(color = guide_legend(ncol = n_col_leyenda,
-                                override.aes = list(linewidth = 1.5)))
+    guides(color = guide_legend(
+      ncol = n_col_leyenda,
+      override.aes = list(linewidth = 1.5)
+    ))
 
   # Altura proporcional al nº de filas de leyenda
   n_filas_leyenda <- ceiling(n_est / n_col_leyenda)
   alto <- 5.5 + n_filas_leyenda * 0.35
 
-  archivo <- file.path(dir_salida,
-                       sprintf("series_superpuestas_%s_2025.png", file))
+  archivo <- file.path(
+    dir_salida,
+    sprintf("series_superpuestas_%s_2025.png", file)
+  )
   ggsave(archivo, plot = p, width = 13, height = alto, dpi = 200, bg = "white")
-  cat(sprintf("  \u2713 %-14s  [%2d estaciones]  %s\n",
-              col, n_est, basename(archivo)))
+  cat(sprintf(
+    "  \u2713 %-14s  [%2d estaciones]  %s\n",
+    col, n_est, basename(archivo)
+  ))
 }
 
 cat("\n\u2713 Todos los archivos guardados en:\n  ", dir_salida, "\n")

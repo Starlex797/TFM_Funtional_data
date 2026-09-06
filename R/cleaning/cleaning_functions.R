@@ -285,7 +285,10 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
   dt <- dt[ESTACION %in% estaciones_objetivo]
   
   # Exclude variables that are not relevant for our analysis (e.g., wind direction).
-  vars_excluir <- c("dir.viento","radiacion.uv")
+  # Estos nombres deben coincidir con los de nombres_magnitudes_clima en
+  # minusculas. Antes la lista decia "radiacion.uv", que no coincidia con
+  # "Radiacion Ultravioleta", asi que la UV nunca llegaba a excluirse.
+  vars_excluir <- c("direccion_viento", "radiacion_ultravioleta")
   dt <- dt[!tolower(MAGNITUD) %in% vars_excluir]
  
   

@@ -19,7 +19,7 @@ anios_procesar <- 2019:2025
 # existen: los originales (sin sufijo) siguen siendo los que consumen los
 # scripts actuales hasta que la nueva versión esté validada.
 # Poner "" para volver a escribir sobre los originales.
-SUFIJO <- "4"
+SUFIJO <- "1"
 
 # Con TRUE el script se detiene si el fichero de destino ya existe, en lugar de
 # sobrescribirlo sin avisar.
@@ -111,5 +111,5 @@ if (length(anios_ok) == 0) {
   cat("   Archivos generados por año: horario / diario / mensual\n")
   cat(strrep("=", 60), "\n")
 }
-
-
+Check_1 <- readRDS(here("data", "processed", "Clima", "diario", "meteo_madrid_2025_diario5.rds"))
+View(Check_1)

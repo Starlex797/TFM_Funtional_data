@@ -20,7 +20,7 @@ setDT(dt_ubicaciones_aire)
 # regla del preprocesamiento, los resultados anteriores siguen disponibles
 # para comparar y cualquier cifra ya publicada sigue siendo rastreable.
 # Poner "" para volver a escribir sobre los originales.
-SUFIJO <- "1"
+SUFIJO <- "2"
 
 # Con TRUE el script se detiene si el fichero de destino ya existe, en lugar
 # de sobrescribirlo sin avisar.
