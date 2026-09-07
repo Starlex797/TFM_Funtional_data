@@ -421,36 +421,130 @@ pesos_ensemble_loocv <- function(dt_meteo, variable, k_vecinos = 3L,
 }
 
 
+#' Normaliza la configuración de interpolación a una tabla variable/metodo/k/p.
+#'
+#' Métodos soportados. Salvo "Media", todos son el mismo estimador de distancia
+#' inversa con distinto número de vecinos (k) y distinto exponente (p):
+#'   - "Media"          -> media de TODAS las estaciones con dato en ese
+#'                         instante; el mismo valor para todas las ubicaciones
+#'                         objetivo (ignora k y p). Sin estructura espacial.
+#'   - "kNN"            -> media simple de los k vecinos      (p = 0)
+#'   - "IDW"            -> ponderación 1/d^p sobre k vecinos  (p = 1 por defecto)
+#'   - "Vecino Cercano" -> el vecino más próximo              (k = 1)
+#'   - "Ensemble"       -> combinación ponderada 1/RMSE de 1-NN, IDW p=1 y kNN
+#'
+#' Admite también el formato antiguo (vector named character variable -> método,
+#' con alias "IDW beta=1" / "IDW beta=2"), en cuyo caso k se toma de k_defecto.
+#'
+#' @param config data.frame/data.table con columnas 'variable' y 'metodo', y
+#'   opcionalmente 'k' y 'p'. O bien un named character del formato antiguo.
+#' @param k_defecto integer. k a usar para las filas que no lo especifican.
+#'
+#' @return data.table con variable, metodo, k, p ya resueltos.
+normalizar_config_clima <- function(config, k_defecto = 3L) {
+  if (is.character(config)) {
+    if (is.null(names(config))) {
+      stop("La configuración en formato vector debe tener nombres (variable -> método).")
+    }
+    config <- data.table(variable = names(config), metodo = unname(config))
+  }
+  # copy(): las asignaciones por referencia de data.table modificarían la tabla
+  # de configuración del script que llama.
+  cfg <- copy(as.data.table(config))
+
+  if (!all(c("variable", "metodo") %in% names(cfg))) {
+    stop("La configuración necesita al menos las columnas 'variable' y 'metodo'.")
+  }
+  if (!"k" %in% names(cfg)) cfg[, k := k_defecto]
+  if (!"p" %in% names(cfg)) cfg[, p := NA_real_]
+  cfg[is.na(k), k := k_defecto]
+
+  # Alias históricos: el exponente iba dentro del nombre del método.
+  cfg[metodo == "IDW beta=1", `:=`(metodo = "IDW", p = 1)]
+  cfg[metodo == "IDW beta=2", `:=`(metodo = "IDW", p = 2)]
+  cfg[metodo %in% c("Closest observation", "Vecino Cercano"),
+    `:=`(metodo = "Vecino Cercano", k = 1L)
+  ]
+
+  # En kNN todos los vecinos pesan igual; en IDW, si no se indica, p = 1.
+  cfg[metodo == "kNN", p := 0]
+  cfg[metodo == "IDW" & is.na(p), p := 1]
+
+  metodos_validos <- c("Media", "IDW", "kNN", "Vecino Cercano", "Ensemble")
+  no_validos <- setdiff(unique(cfg$metodo), metodos_validos)
+  if (length(no_validos) > 0) {
+    stop(
+      "Método no reconocido: ", paste(no_validos, collapse = ", "),
+      ". Válidos: ", paste(metodos_validos, collapse = ", ")
+    )
+  }
+  if (any(cfg$k < 1L)) stop("El número de vecinos k debe ser >= 1.")
+  if (anyDuplicated(cfg$variable)) stop("Hay variables repetidas en la configuración.")
+
+  cfg[, k := as.integer(k)]
+  cfg[, p := as.numeric(p)]
+  cfg[]
+}
+
+
 #' Interpola las variables climáticas a ubicaciones objetivo usando, para cada
-#' variable, su método ganador.
+#' variable, su método y su número de vecinos.
 #'
 #' Para cada instante (día, o día+hora si hay HORA) interpola desde las
 #' estaciones meteorológicas con datos válidos a las ubicaciones objetivo
-#' (e.g. estaciones de NO2). El método se elige por variable mediante el mapa
-#' metodos_por_variable. Métodos soportados: "IDW beta=1", "IDW beta=2", "kNN",
-#' "Vecino Cercano"/"Closest observation" (1-NN) y "Ensemble" (combinación
-#' ponderada 1/RMSE de 1-NN, IDW beta=1 y kNN).
+#' (e.g. estaciones de NO2). Cada variable lleva su propio método, su propio k
+#' y su propio exponente p; ver normalizar_config_clima() para el formato.
 #'
 #' @param dt_meteo data.table con ESTACION, LONGITUD, LATITUD, FECHA (y HORA) y
 #'   las variables.
 #' @param dt_objetivo data.table con ESTACION, LONGITUD, LATITUD objetivo.
-#' @param metodos_por_variable named character. variable -> método.
-#' @param k_vecinos integer. Vecinos para kNN e IDW (por defecto 3).
+#' @param config_variables data.frame con variable, metodo, k, p (o el formato
+#'   antiguo named character variable -> método).
+#' @param k_vecinos integer. k por defecto para las filas que no lo especifican.
 #' @param min_estaciones integer. Estaciones mínimas para interpolar un instante.
+#' @param fallback_media logical. Qué hacer cuando un instante no llega a
+#'   min_estaciones: FALSE (por defecto) lo deja como NA; TRUE usa la media de
+#'   las estaciones disponibles, es decir un valor constante en el espacio para
+#'   ese instante. Útil en escalas agregadas, donde perder un mes entero cuesta
+#'   más que aceptar un valor sin estructura espacial.
+#' @param llaves_tiempo character. Columnas que identifican cada instante. Si es
+#'   NULL se deducen: c("FECHA", "HORA") si hay HORA, si no "FECHA". Se indica
+#'   explícitamente en escalas cuya clave no se llama FECHA (p. ej. "MES").
 #' @param pesos_ensemble named list opcional. variable -> vector de pesos
-#'   (1-NN, IDW beta=1, kNN). Si falta para una variable Ensemble, se estima por
+#'   (1-NN, IDW p=1, kNN). Si falta para una variable Ensemble, se estima por
 #'   LOOCV con pesos_ensemble_loocv().
 #'
 #' @return data.table con ESTACION, claves temporales y variables interpoladas.
 interpolar_clima_por_metodo <- function(dt_meteo, dt_objetivo,
-                                        metodos_por_variable,
+                                        config_variables,
                                         k_vecinos = 3L,
                                         min_estaciones = 7L,
+                                        fallback_media = FALSE,
                                         crs_orig = 4326, crs_proj = 25830,
+                                        llaves_tiempo = NULL,
                                         pesos_ensemble = NULL) {
-  vars <- intersect(names(metodos_por_variable), names(dt_meteo))
-  if (length(vars) == 0L) {
-    stop("Ninguna variable de 'metodos_por_variable' existe en dt_meteo.")
+  cfg <- normalizar_config_clima(config_variables, k_vecinos)
+
+  # Una variable mal escrita no se ignora: pararía el maestro sin esa covariable.
+  faltan <- setdiff(cfg$variable, names(dt_meteo))
+  if (length(faltan) > 0) {
+    stop(
+      "Variables ausentes en dt_meteo: ", paste(faltan, collapse = ", "),
+      "\nDisponibles: ", paste(names(dt_meteo), collapse = ", ")
+    )
+  }
+  vars <- cfg$variable
+
+  message("Configuración de interpolación:")
+  for (i in seq_len(nrow(cfg))) {
+    detalle <- if (cfg$metodo[i] == "Media") {
+      "todas las estaciones con dato"
+    } else if (cfg$metodo[i] == "IDW") {
+      sprintf("k = %d | p = %g", cfg$k[i], cfg$p[i])
+    } else {
+      sprintf("k = %d", cfg$k[i])
+    }
+    message(sprintf("  %-22s %-15s %s", cfg$variable[i], cfg$metodo[i], detalle))
   }
 
   coords_obj <- unique(dt_objetivo[, .(ESTACION, LONGITUD, LATITUD)])
@@ -465,46 +559,62 @@ interpolar_clima_por_metodo <- function(dt_meteo, dt_objetivo,
     crs_proj
   )
 
-  # Pesos del ensemble (solo para variables cuyo método es Ensemble).
+  # Pesos del ensemble (solo para variables cuyo método es Ensemble), con la k
+  # propia de cada variable.
   if (is.null(pesos_ensemble)) pesos_ensemble <- list()
-  for (v in vars) {
-    if (metodos_por_variable[[v]] == "Ensemble" && is.null(pesos_ensemble[[v]])) {
+  for (i in seq_len(nrow(cfg))) {
+    v <- cfg$variable[i]
+    if (cfg$metodo[i] == "Ensemble" && is.null(pesos_ensemble[[v]])) {
       pesos_ensemble[[v]] <- pesos_ensemble_loocv(
-        dt_meteo, v, k_vecinos, crs_orig, crs_proj
+        dt_meteo, v, cfg$k[i], crs_orig, crs_proj
       )
       message(sprintf(
-        "Pesos ensemble %s (1/RMSE): 1-NN=%.3f | IDW b1=%.3f | kNN=%.3f",
+        "Pesos ensemble %s (1/RMSE): 1-NN=%.3f | IDW p=1=%.3f | kNN=%.3f",
         v, pesos_ensemble[[v]][1], pesos_ensemble[[v]][2], pesos_ensemble[[v]][3]
       ))
     }
   }
 
-  tiene_hora <- "HORA" %in% names(dt_meteo)
-  llaves <- if (tiene_hora) c("FECHA", "HORA") else "FECHA"
+  # Clave temporal: si no se indica, se deduce del propio dt_meteo (FECHA, y
+  # HORA si existe). En mensual se pasa "MES" explícitamente.
+  llaves <- llaves_tiempo
+  if (is.null(llaves)) {
+    llaves <- if ("HORA" %in% names(dt_meteo)) c("FECHA", "HORA") else "FECHA"
+  }
+  faltan_llaves <- setdiff(llaves, names(dt_meteo))
+  if (length(faltan_llaves) > 0) {
+    stop("Claves temporales ausentes en dt_meteo: ", paste(faltan_llaves, collapse = ", "))
+  }
+
   instantes <- unique(dt_meteo[, ..llaves])
   setorderv(instantes, llaves)
   n_inst <- nrow(instantes)
   resultados <- vector("list", n_inst)
 
-  # Predice una variable en las ubicaciones objetivo según el método.
-  predecir <- function(sf_obs, metodo, pesos = NULL) {
-    k_real <- min(k_vecinos, nrow(sf_obs))
+  # Predice una variable en las ubicaciones objetivo con su método, su k y su p.
+  # Si en ese instante hay menos estaciones que k, se usan las disponibles.
+  predecir <- function(sf_obs, metodo, k, p, pesos = NULL) {
+    k_real <- min(k, nrow(sf_obs))
     f <- IDW_VAR ~ 1
-    p <- function(nmax, idp) {
+    pred <- function(nmax, idp) {
       idw(f, sf_obs, sf_obj, nmax = nmax, idp = idp, debug.level = 0)$var1.pred
     }
     switch(metodo,
-      "IDW beta=1" = p(k_real, 1),
-      "IDW beta=2" = p(k_real, 2),
-      "kNN" = p(k_real, 0),
-      "Vecino Cercano" = p(1, 2),
-      "Closest observation" = p(1, 2),
-      "Ensemble" = pesos[1] * p(1, 2) +
-        pesos[2] * p(k_real, 1) +
-        pesos[3] * p(k_real, 0),
+      # Media de todas las estaciones con dato: un único valor replicado en
+      # todas las ubicaciones objetivo, sin variación espacial.
+      "Media" = rep(mean(sf_obs[["IDW_VAR"]]), nrow(sf_obj)),
+      "IDW" = pred(k_real, p),
+      "kNN" = pred(k_real, 0),
+      "Vecino Cercano" = pred(1, 2),
+      "Ensemble" = pesos[1] * pred(1, 2) +
+        pesos[2] * pred(k_real, 1) +
+        pesos[3] * pred(k_real, 0),
       stop("Método no reconocido: ", metodo)
     )
   }
+
+  # Recuento de instantes resueltos por el fallback, para informar al final.
+  n_fallback <- setNames(integer(length(vars)), vars)
 
   for (t in seq_len(n_inst)) {
     inst <- instantes[t]
@@ -513,25 +623,48 @@ interpolar_clima_por_metodo <- function(dt_meteo, dt_objetivo,
     dt_out <- data.table(ESTACION = coords_obj$ESTACION)
     for (col in llaves) dt_out[, (col) := inst[[col]]]
 
-    for (v in vars) {
+    for (i in seq_len(nrow(cfg))) {
+      v <- cfg$variable[i]
       dv <- merge(
         dt_mom[, .(ESTACION, valor = get(v))], coords_meteo, by = "ESTACION"
       )
       dv <- dv[!is.na(valor)]
       if (nrow(dv) < min_estaciones) {
-        dt_out[, (v) := NA_real_]
+        # Por debajo del mínimo no se puede resolver un campo espacial. Con
+        # fallback_media se usa la media de las estaciones disponibles: un valor
+        # constante en el espacio, pero preferible a perder el instante entero.
+        if (fallback_media && nrow(dv) > 0) {
+          dt_out[, (v) := mean(dv$valor)]
+          n_fallback[[v]] <- n_fallback[[v]] + 1L
+        } else {
+          dt_out[, (v) := NA_real_]
+        }
         next
       }
       sf_obs <- sf_meteo_base[sf_meteo_base$ESTACION %in% dv$ESTACION, ]
       sf_obs[["IDW_VAR"]] <- dv$valor[match(sf_obs$ESTACION, dv$ESTACION)]
       dt_out[, (v) := predecir(
-        sf_obs, metodos_por_variable[[v]], pesos_ensemble[[v]]
+        sf_obs, cfg$metodo[i], cfg$k[i], cfg$p[i], pesos_ensemble[[v]]
       )]
     }
 
     resultados[[t]] <- dt_out
     if (t %% 200 == 0 || t == n_inst) {
       message(sprintf("Interpolación por método: %d / %d instantes", t, n_inst))
+    }
+  }
+
+  # El fallback no es un fallo, pero sí un valor sin estructura espacial: queda
+  # registrado para que no pase inadvertido en el log.
+  if (any(n_fallback > 0)) {
+    message(sprintf(
+      "Media de las estaciones disponibles (menos de %d donantes) en:", min_estaciones
+    ))
+    for (v in names(n_fallback)[n_fallback > 0]) {
+      message(sprintf(
+        "  %-22s %d de %d instantes (%.1f%%)",
+        v, n_fallback[[v]], n_inst, 100 * n_fallback[[v]] / n_inst
+      ))
     }
   }
 

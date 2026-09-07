@@ -8,6 +8,7 @@ library(gstat)
 library(here)
 source(here("R", "cleaning", "cleaning_functions.R"))
 source(here("R", "interpolation", "FUNCIONES_INTERPOLACION.R"))
+source(here("R", "utilities", "dictionaries.R"))
 
 # Deactivate the S2 engine to avoid issues with spatial operations
 sf_use_s2(FALSE)
@@ -18,9 +19,9 @@ sf_use_s2(FALSE)
 
 ANIO <- 2025
 
-ruta_no2 <- here("data", "processed", "Contaminacion", "horario", paste0("aire_madrid_", ANIO, "_No2_horarios1.rds"))
-ruta_trafico <- here("data", "processed", "Trafico", "Horario_Barrio", ANIO,paste0("trafico_madrid_", ANIO, "_horario_barrio1.rds"))
-ruta_meteo <- here("data", "processed", "Clima", "horario", paste0("meteo_madrid_", ANIO, "_horario5.rds"))
+ruta_no2 <- here("data", "processed", "Contaminacion", "diario", paste0("aire_madrid_", ANIO, "_No2_trans_diarios1.rds"))
+ruta_trafico <-here("data", "processed", "Trafico", "Diario_Barrio", ANIO, paste0("trafico_madrid_", ANIO, "_diario_barrio1.rds"))
+ruta_meteo <- here("data", "processed", "Clima", "diario", paste0("meteo_madrid_", ANIO, "_diario5.rds"))
 
 
 # 2. OUTPUT paths
@@ -67,11 +68,6 @@ for (nm in c("dt_no2", "dt_trafico", "dt_meteo")) {
   if (!inherits(d$FECHA, "Date")) stop("FECHA no es de clase Date en ", nm)
   if (!all(year(d$FECHA) == ANIO)) stop("Hay fechas fuera del año ", ANIO, " en ", nm)
 }
-stopifnot(
-  !any(duplicated(dt_no2[, .(ESTACION, FECHA, HORA)])),
-  !any(duplicated(dt_meteo[, .(ESTACION, FECHA, HORA)])),
-  !any(duplicated(dt_trafico[, .(barrio, FECHA, HORA)]))
-)
 
 # Automatic detection: Is it daily or hourly?
 llaves_tiempo <- "FECHA"
@@ -82,14 +78,25 @@ if ("HORA" %in% names(dt_no2)) {
   cat("✅ DAILY mode detected automatically.\n")
 }
 
+# Unicidad de las claves de unión. Se comprueba después de detectar la escala
+# porque las claves son (FECHA) en diario y (FECHA, HORA) en horario: fijar HORA
+# aquí rompería el modo diario, donde esa columna no existe.
+stopifnot(
+  !any(duplicated(dt_no2[, c("ESTACION", llaves_tiempo), with = FALSE])),
+  !any(duplicated(dt_meteo[, c("ESTACION", llaves_tiempo), with = FALSE])),
+  !any(duplicated(dt_trafico[, c("barrio", llaves_tiempo), with = FALSE]))
+)
+
 # 2. OUTPUT paths (set after temporal detection)
 escala_temporal <- if ("HORA" %in% llaves_tiempo) "horario" else "diario"
 ruta_out_clima <- here(
   "data", "processed", "Clima", escala_temporal,
   paste0("clima_interpolado_", escala_temporal, "_", ANIO, ".rds")
 )
+# El maestro se guarda en una carpeta por año. El nombre del fichero ya lleva la
+# escala, así que el diario y el horario de un mismo año conviven sin pisarse.
 ruta_out_maestro <- here(
-  "data", "processed", "Maestro", escala_temporal,
+  "data", "processed", "Maestro", as.character(ANIO),
   paste0("dataset_maestro_inla_", ANIO, "_", toupper(escala_temporal), ".rds")
 )
 
@@ -115,11 +122,32 @@ for (nm in c("dt_no2", "dt_trafico", "dt_meteo")) {
 }
 
 # --- Tipología de la estación de contaminación --------------------------------
-# NOM_TIPO (Suburbana / Urbana fondo / Urbana tráfico) es una covariable nueva
-# del preprocesamiento: clasifica las 24 estaciones por entorno de medida y
-# explica parte de la variabilidad que, si no, absorbería el campo espacial.
+# NOM_TIPO (Suburbana / Urbana fondo / Urbana tráfico) clasifica las estaciones
+# por entorno de medida y explica parte de la variabilidad que, si no, acabaría
+# absorbida por el campo espacial.
+# El fichero horario la trae; el diario no. Como es un atributo fijo de cada
+# estación, en ese caso se recupera del fichero de estaciones en lugar de
+# renunciar a la covariable.
 if (!"NOM_TIPO" %in% names(dt_no2)) {
-  stop("Falta NOM_TIPO en los datos de NO2: revisa el preprocesamiento.")
+  ubic_estaciones <- fread(
+    here("data", "raw", "Datos_contaminacion", "Estaciones", "datos.csv")
+  )
+  tipos_estacion <- unique(
+    ubic_estaciones[, .(
+      ESTACION = unname(nombres_estaciones_aire[as.character(CODIGO_CORTO)]),
+      NOM_TIPO
+    )][!is.na(ESTACION)],
+    by = "ESTACION"
+  )
+  sin_tipo <- setdiff(unique(dt_no2$ESTACION), tipos_estacion$ESTACION)
+  if (length(sin_tipo) > 0) {
+    stop(
+      "Estaciones sin NOM_TIPO en el fichero de estaciones: ",
+      paste(sin_tipo, collapse = ", ")
+    )
+  }
+  dt_no2 <- merge(dt_no2, tipos_estacion, by = "ESTACION", all.x = TRUE)
+  cat("NOM_TIPO recuperado del fichero de estaciones.\n")
 }
 dt_no2[, NOM_TIPO := factor(NOM_TIPO)]
 cat("\nTipología de estaciones (NOM_TIPO):\n")
@@ -173,39 +201,55 @@ dt_no2 <- merge(dt_no2, dt_est_geo, by = "ESTACION", all.x = TRUE)
 # ==============================================================================
 # BLOCK 4: METEOROLOGY INTERPOLATION (winning method per variable)
 # ==============================================================================
-# Cada variable se interpola con su método ganador (validado por LOOCV), el
-# mismo en escala diaria y horaria. Humedad usa el ensemble (combinación 1/RMSE
-# de 1-NN, IDW beta=1 y kNN); el resto, métodos locales directos.
 coords_no2 <- unique(dt_no2[, .(ESTACION, LONGITUD, LATITUD)])
 
-# Nombres según el preprocesamiento actual del clima: guion bajo y sin tildes,
-# tal y como los define el diccionario de magnitudes climáticas.
-metodos_clima <- c(
-  "Temperatura"         = "IDW beta=1",
-  "Humedad_Relativa"    = "Ensemble",
-  "Precipitaciones"     = "IDW beta=1",
-  "Presion_Barometrica" = "kNN",
-  "Radiacion_Solar"     = "kNN",
-  "Velocidad_Viento"    = "IDW beta=1"
+# ------------------------------------------------------------------------------
+# CONFIGURACIÓN DE LA INTERPOLACIÓN — es lo único que hay que tocar aquí.
+# ------------------------------------------------------------------------------
+# Una fila por variable, y una tabla por escala temporal: el script elige la que
+# toca según la escala detectada en el Bloque 1. Métodos y vecinos validados por
+# LOOCV (ver R/interpolation/ y outputs/figures/interpolacion_clima/).
+#
+#   metodo : "kNN"  -> media simple de los k vecinos       (ignora p)
+#            "IDW"  -> ponderación 1/d^p sobre k vecinos
+#            "Vecino Cercano" -> el más próximo            (fuerza k = 1)
+#            "Ensemble"       -> mezcla 1/RMSE de 1-NN, IDW p=1 y kNN
+#   k      : número de vecinos usados.
+#   p      : exponente de la distancia, solo aplica a "IDW".
+#
+# Para cambiar un método o una k, edita la celda correspondiente y ya está: el
+# resto del script (validaciones, filtro de calidad y estandarización) se deriva
+# de esta tabla.
+vars_clima <- c(
+  "Temperatura", "Humedad_Relativa", "Precipitaciones",
+  "Presion_Barometrica", "Radiacion_Solar", "Velocidad_Viento"
 )
 
-# interpolar_clima_por_metodo() filtra con intersect(), así que una variable mal
-# escrita se descartaría sin avisar y el maestro saldría sin ella. Se comprueba
-# antes para que un renombrado en el preprocesamiento pare el script.
-faltan_clima <- setdiff(names(metodos_clima), names(dt_meteo))
-if (length(faltan_clima) > 0) {
-  stop(
-    "Variables climáticas ausentes en dt_meteo: ",
-    paste(faltan_clima, collapse = ", "),
-    "\nDisponibles: ", paste(names(dt_meteo), collapse = ", ")
+config_clima_por_escala <- list(
+  horario = data.table(
+    variable = vars_clima,
+    metodo   = c("IDW", "IDW", "kNN", "kNN", "kNN", "kNN"),
+    k        = c(3L, 3L, 4L, 3L, 3L, 4L),
+    p        = c(1, 1, NA, NA, NA, NA)
+  ),
+  diario = data.table(
+    variable = vars_clima,
+    metodo   = c("IDW", "IDW", "kNN", "kNN", "kNN", "kNN"),
+    k        = c(3L, 3L, 3L, 3L, 3L, 2L),
+    p        = c(1, 1, NA, NA, NA, NA)
   )
+)
+
+if (!escala_temporal %in% names(config_clima_por_escala)) {
+  stop("No hay configuración de interpolación para la escala '", escala_temporal, "'.")
 }
+config_clima <- config_clima_por_escala[[escala_temporal]]
+cat(sprintf("\nInterpolación climática en escala %s.\n", toupper(escala_temporal)))
 
 dt_clima_interp <- interpolar_clima_por_metodo(
   dt_meteo = dt_meteo,
   dt_objetivo = coords_no2,
-  metodos_por_variable = metodos_clima,
-  k_vecinos = 3L
+  config_variables = config_clima
 )
 
 saveRDS(dt_clima_interp, ruta_out_clima)
@@ -227,44 +271,16 @@ dt_maestro <- merge(dt_maestro, dt_clima_interp, by = llaves_meteo, all.x = TRUE
 # Create a numeric ID for the districts
 dt_maestro[, ID_DISTRITO := .GRP, by = distrito]
 
-# ==============================================================================
-# BLOCK 5b: REMOVE DAYS WITH NO COVARIATE DATA (e.g. city-wide blackout)
-# A date is dropped if ALL climate variables are NA for ALL stations that day.
-# ==============================================================================
-# Las mismas variables que se han interpolado: si alguna no llegó al maestro es
-# un fallo del join, no algo que deba ignorarse en silencio.
-cols_clima_check <- names(metodos_clima)
-faltan_check <- setdiff(cols_clima_check, names(dt_maestro))
-if (length(faltan_check) > 0) {
-  stop("Faltan variables climáticas en el maestro: ", paste(faltan_check, collapse = ", "))
+# Comprobación de integridad del join: si alguna variable interpolada no llegó
+# al maestro es un fallo, no algo que deba pasar desapercibido. No filtra nada.
+cols_clima <- config_clima$variable
+faltan_maestro <- setdiff(cols_clima, names(dt_maestro))
+if (length(faltan_maestro) > 0) {
+  stop("Faltan variables climáticas en el maestro: ", paste(faltan_maestro, collapse = ", "))
 }
 
-umbral_na_clima <- 0.10 # Drop day if any climate variable exceeds this NA rate
-
-# For each date, compute the NA rate per variable; flag the date if any exceeds the threshold
-fechas_exceden <- dt_maestro[,
-  lapply(.SD, function(x) mean(is.na(x))),
-  .SDcols = cols_clima_check,
-  by = FECHA
-][, excede := apply(.SD, 1, function(r) any(r > umbral_na_clima)),
-  .SDcols = cols_clima_check
-][excede == TRUE]
-
-fechas_eliminar <- fechas_exceden$FECHA
-
-if (length(fechas_eliminar) > 0) {
-  cat(sprintf(
-    "\n⚠️  Eliminando %d día(s) donde alguna variable climática supera el %.0f%% de NAs:\n",
-    length(fechas_eliminar), umbral_na_clima * 100
-  ))
-  print(fechas_exceden[, c("FECHA", cols_clima_check), with = FALSE])
-  dt_maestro <- dt_maestro[!FECHA %in% fechas_eliminar]
-} else {
-  cat(sprintf(
-    "\n✅ Ningún día supera el %.0f%% de NAs en covariables climáticas.\n",
-    umbral_na_clima * 100
-  ))
-}
+# No se descarta ninguna fecha por cobertura de covariables: el maestro conserva
+# todos los días del año y los NA se dejan tal cual para tratarlos en el modelo.
 
 # ==============================================================================
 # BLOCK 6: COVARIATE STANDARDIZATION (Z-SCORE)
@@ -276,7 +292,7 @@ dt_maestro[, intensidad := scale(intensidad)[, 1]]
 dt_maestro[, carga := scale(carga)[, 1]]
 
 # Climate: las seis variables interpoladas, ya validadas más arriba.
-cols_clima_std <- cols_clima_check
+cols_clima_std <- cols_clima
 
 for (v in cols_clima_std) {
   raw_name <- paste0(v, "_raw")
@@ -318,18 +334,34 @@ print(head(dt_maestro[, ..cols_print]))
 # BLOCK 8: NA DIAGNOSTICS ON THE MASTER DATASET
 # ==============================================================================
 
-# 1. Count of NA/NaN per column (only columns with at least one NA)
+# 1. NA por columna, TODAS las variables (también las completas: saber que una
+#    columna está a cero es tan informativo como saber que le faltan datos).
+#
+#    pct                 = % sobre el total de filas del maestro, donde una fila
+#                          es estación x fecha (x hora en escala horaria).
+#    instantes_afectados = fechas (o fecha+hora) con al menos un NA. Distingue un
+#                          hueco concentrado en pocos días de otro repartido por
+#                          todo el año, que en pct son indistinguibles.
 cat("\n--- NA summary by column ---\n")
-na_resumen <- dt_maestro[, lapply(.SD, function(x) sum(is.na(x)))] |>
-  as.data.frame() |>
-  t() |>
-  as.data.frame() |>
-  setNames("n_NA") |>
-  tibble::rownames_to_column("columna") |>
-  dplyr::filter(n_NA > 0) |>
-  dplyr::mutate(pct = round(n_NA / nrow(dt_maestro) * 100, 2)) |>
-  dplyr::arrange(dplyr::desc(n_NA))
-print(na_resumen)
+n_filas <- nrow(dt_maestro)
+n_instantes <- uniqueN(dt_maestro[, llaves_tiempo, with = FALSE])
+
+na_resumen <- data.table(
+  columna = names(dt_maestro),
+  n_NA = vapply(dt_maestro, function(x) sum(is.na(x)), integer(1))
+)
+na_resumen[, pct := round(100 * n_NA / n_filas, 2)]
+na_resumen[, instantes_afectados := vapply(columna, function(v) {
+  filas_na <- dt_maestro[is.na(get(v))]
+  if (nrow(filas_na) == 0L) 0L else uniqueN(filas_na[, llaves_tiempo, with = FALSE])
+}, integer(1))]
+setorder(na_resumen, -n_NA, columna)
+
+cat(sprintf(
+  "Filas: %d (%d estaciones x %d instantes)\n",
+  n_filas, uniqueN(dt_maestro$ESTACION), n_instantes
+))
+print(na_resumen, nrows = Inf)
 
 # 2. NO2: missing observations per station
 col_no2 <- if ("DATO" %in% names(dt_maestro)) "DATO" else "DATO_DIARIO"
@@ -435,169 +467,3 @@ ruta_plot_trafico <- here("outputs", "analysis", "plots", paste0("cobertura_traf
 ggsave(filename = ruta_plot_trafico, plot = p_trafico_maestro, width = 8, height = 6, dpi = 200, bg = "white")
 cat("✅ Mapa de tráfico maestro guardado en:", ruta_plot_trafico, "\n")
 
-# ==============================================================================
-# BLOCK 10: MONTHLY MULTI-YEAR MASTER DATASET (2019–2025)
-# ==============================================================================
-# Objetivo: agregar los maestros diarios de 7 anos a escala mensual para
-# analizar covariables macro (efecto a escala estacional/interanual) vs
-# micro (efecto solo a escala horaria/diaria).
-#
-# Estrategia:
-#   1. Cargar los 7 maestros diarios y apilarlos
-#   2. Agregar a mensual por estacion (media para continuas, suma para precip.)
-#   3. Aplicar umbral de calidad: si >20% dias del mes son NA, mes = NA
-#   4. Re-estandarizar covariables a escala mensual
-#   5. Guardar como dataset_maestro_inla_2019_2025_MENSUAL.rds
-# ==============================================================================
-
-cat("\n", strrep("=", 70), "\n")
-cat("  BLOCK 10: Construyendo dataset maestro MENSUAL multi-anual (2019-2025)\n")
-cat(strrep("=", 70), "\n")
-
-ANIOS_MENSUAL <- 2019:2025
-
-# Columnas comunes a retener (sin "ocupacion" que no esta en todos los anos)
-cols_comunes <- c(
-  "ESTACION", "FECHA", "barrio", "LONGITUD", "LATITUD",
-  "DATO_DIARIO", "distrito", "ID_DISTRITO",
-  "intensidad_raw", "carga_raw",
-  "Temperatura_raw", "Humedad_Relativa_raw",
-  "Precipitaciones_raw", "Presion Barométrica_raw",
-  "Radiación Solar_raw", "Velocidad Viento_raw"
-)
-
-lista_anios <- list()
-
-for (anio_i in ANIOS_MENSUAL) {
-  ruta_i <- here(
-    "data", "processed", "Maestro", "diario",
-    paste0("dataset_maestro_inla_", anio_i, "_DIARIO.rds")
-  )
-  if (!file.exists(ruta_i)) {
-    cat(sprintf("  ⚠️  %d: archivo no encontrado, saltando.\n", anio_i))
-    next
-  }
-  dt_i <- readRDS(ruta_i)
-  setDT(dt_i)
-  # Retener solo columnas comunes
-  cols_usar <- intersect(cols_comunes, names(dt_i))
-  dt_i <- dt_i[, ..cols_usar]
-  dt_i[, ANIO := year(FECHA)]
-  lista_anios[[as.character(anio_i)]] <- dt_i
-  cat(sprintf(
-    "  %d: %d filas | %s → %s\n",
-    anio_i, nrow(dt_i), format(min(dt_i$FECHA)), format(max(dt_i$FECHA))
-  ))
-}
-
-dt_todos <- rbindlist(lista_anios, fill = TRUE)
-cat(sprintf(
-  "\n  Total apilado: %d filas | %d estaciones | %d anos\n",
-  nrow(dt_todos), uniqueN(dt_todos$ESTACION), uniqueN(dt_todos$ANIO)
-))
-
-# --- Agregacion mensual ---
-dt_todos[, ANIO_MES := as.Date(format(FECHA, "%Y-%m-01"))]
-
-# Variables continuas: media mensual | Precipitaciones: suma mensual
-cols_media <- c(
-  "intensidad_raw", "carga_raw", "Temperatura_raw",
-  "Humedad_Relativa_raw", "Presion Barométrica_raw",
-  "Radiación Solar_raw", "Velocidad Viento_raw"
-)
-col_suma <- "Precipitaciones_raw"
-
-# Dias por mes para umbral de calidad
-dt_todos[, dias_mes_teorico := as.integer(
-  as.Date(format(FECHA + 32, "%Y-%m-01")) - as.Date(format(FECHA, "%Y-%m-01"))
-)]
-
-dt_mensual <- dt_todos[,
-  {
-    n_dias <- .N
-    dias_mes <- dias_mes_teorico[1]
-    pct_cobertura <- n_dias / dias_mes
-
-    # Si <80% de dias disponibles, marcar como NA
-    if (pct_cobertura < 0.80) {
-      res <- list(
-        DATO_NO2 = NA_real_,
-        n_dias_disponibles = n_dias,
-        pct_cobertura = round(pct_cobertura * 100, 1)
-      )
-      for (v in cols_media) res[[v]] <- NA_real_
-      res[[col_suma]] <- NA_real_
-    } else {
-      # NO2: media de los valores crudos diarios
-      no2_vals <- DATO_DIARIO[!is.na(DATO_DIARIO)]
-      res <- list(
-        DATO_NO2 = if (length(no2_vals) > 0) mean(no2_vals) else NA_real_,
-        n_dias_disponibles = n_dias,
-        pct_cobertura = round(pct_cobertura * 100, 1)
-      )
-      for (v in cols_media) {
-        vals <- get(v)[!is.na(get(v))]
-        res[[v]] <- if (length(vals) > 0) mean(vals) else NA_real_
-      }
-      # Precipitacion: suma
-      vals_p <- get(col_suma)[!is.na(get(col_suma))]
-      res[[col_suma]] <- if (length(vals_p) > 0) sum(vals_p) else NA_real_
-    }
-    res
-  },
-  by = .(ESTACION, ANIO_MES, barrio, distrito, LONGITUD, LATITUD, ID_DISTRITO)
-]
-
-setnames(dt_mensual, "ANIO_MES", "FECHA")
-dt_mensual[, LOG_NO2 := log(DATO_NO2)]
-dt_mensual[, ANIO := year(FECHA)]
-
-# --- Re-estandarizar covariables a escala mensual ---
-cols_std_mensual <- c(
-  "intensidad_raw", "carga_raw", "Temperatura_raw",
-  "Humedad_Relativa_raw", "Precipitaciones_raw",
-  "Presion Barométrica_raw", "Radiación Solar_raw",
-  "Velocidad Viento_raw"
-)
-# Alias sin "_raw" para las estandarizadas
-cols_alias_mensual <- gsub("_raw$", "", cols_std_mensual)
-
-for (i in seq_along(cols_std_mensual)) {
-  v_raw <- cols_std_mensual[i]
-  v_alias <- cols_alias_mensual[i]
-  if (v_raw %in% names(dt_mensual)) {
-    dt_mensual[, (v_alias) := scale(get(v_raw))[, 1]]
-  }
-}
-
-# ID_TIEMPO secuencial para INLA
-fechas_unicas <- sort(unique(dt_mensual$FECHA))
-dt_mensual[, ID_TIEMPO := match(FECHA, fechas_unicas)]
-setorder(dt_mensual, ID_TIEMPO, ESTACION)
-
-# --- Guardar ---
-ruta_mensual_out <- here(
-  "data", "processed", "Maestro", "mensual",
-  "dataset_maestro_inla_2019_2025_MENSUAL.rds"
-)
-dir.create(dirname(ruta_mensual_out), recursive = TRUE, showWarnings = FALSE)
-saveRDS(dt_mensual, ruta_mensual_out)
-
-# --- Resumen ---
-cat("\n--- Dataset mensual multi-anual ---\n")
-cat(sprintf(
-  "  Filas: %d | Estaciones: %d | Meses: %d\n",
-  nrow(dt_mensual), uniqueN(dt_mensual$ESTACION),
-  uniqueN(dt_mensual$FECHA)
-))
-cat(sprintf(
-  "  Periodo: %s → %s\n",
-  format(min(dt_mensual$FECHA)), format(max(dt_mensual$FECHA))
-))
-cat(sprintf(
-  "  NAs en LOG_NO2: %d (%.1f%%)\n",
-  sum(is.na(dt_mensual$LOG_NO2)),
-  mean(is.na(dt_mensual$LOG_NO2)) * 100
-))
-cat(sprintf("  Guardado en: %s\n", ruta_mensual_out))
-cat("✅ Dataset mensual 2019-2025 completado.\n")

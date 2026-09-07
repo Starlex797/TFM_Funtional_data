@@ -72,9 +72,13 @@ malla_fina <- inla.mesh.2d(
 
 
 # 5. Exportar los tres archivos al disco duro
-saveRDS(malla_gruesa, here("data", "processed", "malla_spde_madrid_gruesa.rds"))
-saveRDS(malla_media, here("data", "processed", "malla_spde_madrid_media.rds"))
-saveRDS(malla_fina, here("data", "processed", "malla_spde_madrid_fina.rds"))
+# saveRDS() no crea directorios: hay que asegurar la carpeta antes de guardar.
+carpeta_mallas <- here("data", "processed", "Malla")
+dir.create(carpeta_mallas, recursive = TRUE, showWarnings = FALSE)
+
+saveRDS(malla_gruesa, file.path(carpeta_mallas, "malla_spde_madrid_gruesa.rds"))
+saveRDS(malla_media, file.path(carpeta_mallas, "malla_spde_madrid_media.rds"))
+saveRDS(malla_fina, file.path(carpeta_mallas, "malla_spde_madrid_fina.rds"))
 
 
 # Visualizar cuántos vértices (nodos) tiene cada una para compararlas en el TFM
