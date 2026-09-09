@@ -8,20 +8,16 @@
 # ESTABILIDAD: la malla mas gruesa a partir de la cual el rango, la sigma y el
 # error dejan de moverse.
 #
-# Todo se mantiene fijo entre mallas (datos, covariables, priors, particion)
-# para que la unica diferencia sea la malla.
 # ==============================================================================
 
 library(INLA)
 library(data.table)
 library(here)
 
-source(here("R", "modeling", "spde_config.R"))
-
 # ------------------------------------------------------------------------------
 # CONFIGURACION
 # ------------------------------------------------------------------------------
-ANIO   <- 2025
+ANIO <- 2025
 ESCALA <- "DIARIO"
 MALLAS <- c("gruesa", "media", "fina")
 
@@ -34,17 +30,21 @@ MALLAS <- c("gruesa", "media", "fina")
 # Se coge invierno, que es cuando hay episodios de NO2 y la estructura espacial
 # esta mas marcada, que es justo lo que tiene que resolver la malla.
 FECHA_INICIO <- as.Date("2025-01-01")
-N_DIAS       <- 60
+N_DIAS <- 60
 
 # Estas son las que van en la formula. Si se anade o quita una aqui, hay que
 # tocarla tambien en las dos formulas del bucle (estan escritas a mano, a
 # proposito, para que se lea que entra en cada modelo).
 COVARIABLES <- c("intensidad", "Temperatura", "Velocidad_Viento")
 
+# PC priors fijos para todas las mallas.
+PRIOR_RANGE <- c(9.3, 0.9) # P(rango < 9.3 km) = 0.9
+PRIOR_SIGMA <- c(0.6, 0.05) # P(sigma > 0.6) = 0.05
+
 # Los dos modelos que se comparan en cada malla:
 #   espacial         -> un unico campo espacial para los 60 dias
 #   espacio_temporal -> una replica del campo por dia, encadenadas con AR1
-TIPOS <- c("espacial", "espacio_temporal")
+TIPOS <- c("espacial")
 
 # VALIDACION: leave-one-station-out sobre las 24 estaciones.
 #
@@ -75,6 +75,7 @@ setDT(df)
 # La respuesta ya viene transformada: LOG_NO2_DIARIO es log1p(DATO_DIARIO).
 # No hay que volver a aplicar ningun logaritmo.
 df[, y := LOG_NO2_DIARIO]
+df[, NO2 := DATO_DIARIO]
 
 # Ventana consecutiva [FECHA_INICIO, FECHA_INICIO + N_DIAS - 1]
 FECHA_FIN <- FECHA_INICIO + N_DIAS - 1L
@@ -90,8 +91,8 @@ df <- df[complete.cases(df[, c("y", COVARIABLES), with = FALSE])]
 # en la numeracion en vez de "cerrar filas" y hacer pasar por consecutivos dos
 # dias que en el calendario no lo son.
 df[, ID_TIEMPO := as.integer(FECHA - FECHA_INICIO) + 1L]
-setorder(df, ID_TIEMPO, ESTACION)   # a partir de aqui NO se reordena mas
-n_dias <- N_DIAS                    # grupos del AR1 = dias del calendario
+setorder(df, ID_TIEMPO, ESTACION) # a partir de aqui NO se reordena mas
+n_dias <- N_DIAS # grupos del AR1 = dias del calendario
 
 # ------------------------------------------------------------------------------
 # Grupos del leave-one-station-out
@@ -102,159 +103,182 @@ estaciones <- sort(unique(df$ESTACION))
 filas_por_estacion <- split(seq_len(nrow(df)), df$ESTACION)
 grupos <- filas_por_estacion[as.character(df$ESTACION)]
 
-coords <- as.matrix(df[, .(X_km, Y_km)])   # UTM 30N en km, ya vienen del Paso 2
+coords <- as.matrix(df[, .(X_km, Y_km)]) # UTM 30N en km, ya vienen del Paso 2
 
-cat("\nVentana:", format(FECHA_INICIO), "a", format(FECHA_FIN),
-    "|", n_dias, "dias consecutivos\n")
-cat("Filas:", nrow(df), "| Estaciones:", length(estaciones),
-    "| Dias con datos:", uniqueN(df$ID_TIEMPO), "de", n_dias, "\n\n")
+cat(
+  "\nVentana:", format(FECHA_INICIO), "a", format(FECHA_FIN),
+  "|", n_dias, "dias consecutivos\n"
+)
+cat(
+  "Filas:", nrow(df), "| Estaciones:", length(estaciones),
+  "| Dias con datos:", uniqueN(df$ID_TIEMPO), "de", n_dias, "\n\n"
+)
+cat(sprintf(
+  "SD NO2 original: %.3f | SD log1p(NO2): %.3f\n\n",
+  sd(df$NO2, na.rm = TRUE), sd(df$y, na.rm = TRUE)
+))
 
 # ==============================================================================
 # PASO 2-8: UN MODELO POR (MALLA, TIPO)
 # ==============================================================================
-resultados   <- list()
+resultados <- list()
 por_estacion <- list()
 
 for (tipo in TIPOS) {
-for (nombre_malla in MALLAS) {
+  for (nombre_malla in MALLAS) {
+    clave <- paste(tipo, nombre_malla, sep = " | ")
+    cat("--- ", clave, " ---\n", sep = "")
 
-  clave <- paste(tipo, nombre_malla, sep = " | ")
-  cat("--- ", clave, " ---\n", sep = "")
+    # --- PASO 2: malla y objeto SPDE -------------------------------------------
+    mesh <- readRDS(here(
+      "data", "processed", "Malla", paste0("malla_spde_madrid_", nombre_malla, ".rds")
+    ))
+    spde <- inla.spde2.pcmatern(
+      mesh = mesh,
+      prior.range = PRIOR_RANGE,
+      prior.sigma = PRIOR_SIGMA
+    )
 
-  # --- PASO 2: malla y objeto SPDE -------------------------------------------
-  mesh <- readRDS(here(
-    "data", "processed", "Malla", paste0("malla_spde_madrid_", nombre_malla, ".rds")
-  ))
-  spde <- crear_spde(mesh, escala = ESCALA)   # PC priors del proyecto
+    # --- PASOS 3, 4 y 6: indice, matriz A y formula -----------------------------
+    # Los tres tienen que concordar en nombre y dimension, asi que se escriben
+    # juntos: si el indice lleva n.group, la matriz A tiene que llevar group y la
+    # formula control.group. Separarlos es la via para que se desincronicen.
+    if (tipo == "espacial") {
+      # Un unico campo espacial compartido por los 60 dias.
+      s.index <- inla.spde.make.index("spatial.field", n.spde = spde$n.spde)
+      A.estud <- inla.spde.make.A(mesh = mesh, loc = coords)
 
-  # --- PASOS 3, 4 y 6: indice, matriz A y formula -----------------------------
-  # Los tres tienen que concordar en nombre y dimension, asi que se escriben
-  # juntos: si el indice lleva n.group, la matriz A tiene que llevar group y la
-  # formula control.group. Separarlos es la via para que se desincronicen.
-  if (tipo == "espacial") {
+      formula <- y_response ~ -1 + Intercept +
+        intensidad + Temperatura + Velocidad_Viento +
+        f(spatial.field, model = spde)
+    } else {
+      # Una replica del campo espacial por dia (n.group = n_dias), encadenadas
+      # por un AR1. Incognitas del campo: nodos x dias.
+      s.index <- inla.spde.make.index("spatial.field",
+        n.spde = spde$n.spde,
+        n.group = n_dias
+      )
+      A.estud <- inla.spde.make.A(
+        mesh = mesh, loc = coords,
+        group = df$ID_TIEMPO, n.group = n_dias
+      )
 
-    # Un unico campo espacial compartido por los 60 dias.
-    s.index <- inla.spde.make.index("spatial.field", n.spde = spde$n.spde)
-    A.estud <- inla.spde.make.A(mesh = mesh, loc = coords)
+      formula <- y_response ~ -1 + Intercept +
+        intensidad + Temperatura + Velocidad_Viento +
+        f(spatial.field,
+          model = spde, group = spatial.field.group,
+          control.group = list(model = "ar1")
+        )
+    }
 
-    formula <- y_response ~ -1 + Intercept +
-      intensidad + Temperatura + Velocidad_Viento +
-      f(spatial.field, model = spde)
+    # --- PASO 5: inla.stack ----------------------------------------------------
+    # A altera la dimension del predictor lineal, asi que no se puede pasar un
+    # data.frame clasico a inla(). Se empaquetan respuesta, covariables y campo
+    # espacial en el stack:
+    #   A = list(A.estud, 1) -> A.estud proyecta el campo, 1 (identidad) el resto
+    #   El Intercept va DENTRO del stack, como efecto manual.
+    stack.est <- inla.stack(
+      data = list(y_response = df$y), # se ajusta con TODOS los datos
+      A = list(A.estud, 1),
+      effects = list(
+        c(s.index, list(Intercept = 1)),
+        as.data.frame(df[, COVARIABLES, with = FALSE])
+      ),
+      tag = "est"
+    )
 
-  } else {
+    # --- PASO 6b: ajuste --------------------------------------------------------
+    # La formula (arriba) lleva -1 para quitar el intercepto automatico de R y
+    # usar el Intercept que viaja dentro del stack.
+    t0 <- Sys.time()
+    m1 <- inla(
+      formula,
+      data = inla.stack.data(stack.est, spde = spde),
+      family = "gaussian", # la respuesta ya esta en log: gaussiana, no gamma
+      control.predictor = list(A = inla.stack.A(stack.est), compute = TRUE),
+      control.compute = list(cpo = TRUE, dic = TRUE, waic = TRUE, return.marginals.predictor = TRUE),
+      control.inla = list(int.strategy = "eb") # Empirical Bayes: mas rapido
+    )
+    minutos <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 
-    # Una replica del campo espacial por dia (n.group = n_dias), encadenadas
-    # por un AR1. Incognitas del campo: nodos x dias.
-    s.index <- inla.spde.make.index("spatial.field", n.spde = spde$n.spde,
-                                    n.group = n_dias)
-    A.estud <- inla.spde.make.A(mesh = mesh, loc = coords,
-                                group = df$ID_TIEMPO, n.group = n_dias)
+    # --- PASO 7: rango y varianza en escala fisica (km) ------------------------
+    # INLA estima el campo en escala logaritmica interna (Theta1, Theta2).
+    # inla.spde2.result lo devuelve a rango (km) y varianza marginal.
+    spde.result <- inla.spde2.result(
+      inla = m1, name = "spatial.field",
+      spde = spde, do.transf = TRUE
+    )
 
-    formula <- y_response ~ -1 + Intercept +
-      intensidad + Temperatura + Velocidad_Viento +
-      f(spatial.field, model = spde, group = spatial.field.group,
-        control.group = list(model = "ar1"))
+    rango <- inla.zmarginal(spde.result$marginals.range.nominal[[1]], silent = TRUE)
+    varia <- inla.zmarginal(spde.result$marginals.variance.nominal[[1]], silent = TRUE)
+
+    # --- PASO 8: validacion leave-one-station-out ------------------------------
+    # gcv$mean y gcv$sd son la media y la sd de la distribucion PREDICTIVA de
+    # cada observacion habiendo quitado su estacion entera. La sd ya incluye el
+    # ruido de observacion (a diferencia de summary.fitted.values$sd, que solo
+    # recoge la incertidumbre de la media ajustada), asi que Cov95 se calcula
+    # directamente con ella.
+    gcv <- inla.group.cv(result = m1, groups = grupos)
+
+    err <- gcv$mean - df$y
+
+    # RMSE y MAE en la escala log de la respuesta (LOG_NO2_DIARIO). No se deshace
+    # el log1p: en la escala original el error lo dominarian los dias de episodio
+    # y dejaria de medir la calidad de la interpolacion espacial.
+    rmse <- sqrt(mean(err^2))
+    mae <- mean(abs(err))
+
+    # Cov95: % de observaciones dentro de su intervalo predictivo del 95%.
+    # El RMSE mide si el punto acierta; Cov95, si la incertidumbre esta bien
+    # calibrada. Muy por debajo de 95 = modelo demasiado confiado; muy por
+    # encima = intervalos inutilmente anchos.
+    cov95 <- 100 * mean(gcv$mean - 1.96 * gcv$sd <= df$y & df$y <= gcv$mean + 1.96 * gcv$sd)
+    lcpo <- mean(-log(m1$cpo$cpo), na.rm = TRUE)
+    pit_mean <- mean(m1$cpo$pit, na.rm = TRUE)
+    pit_sd <- sd(m1$cpo$pit, na.rm = TRUE)
+
+    # Rho del AR1. Solo existe en el modelo espacio-temporal; en el espacial
+    # queda NA. Al ser dias consecutivos SI es la autocorrelacion de un dia al
+    # siguiente. Si sale pegado a 1, el AR1 ha degenerado en paseo aleatorio y el
+    # modelo esta absorbiendo los datos en vez de explicarlos.
+    fila_rho <- grep("GroupRho", rownames(m1$summary.hyperpar))[1]
+    rho_ar1 <- if (is.na(fila_rho)) NA_real_ else m1$summary.hyperpar$mean[fila_rho]
+
+    # Error por estacion: dice DONDE falla el campo. Se espera que las peores
+    # sean las aisladas (El Pardo) y las mejores las rodeadas de vecinas.
+    por_estacion[[clave]] <- data.table(
+      tipo = tipo, malla = nombre_malla, ESTACION = df$ESTACION, err = err
+    )[, .(RMSE = sqrt(mean(err^2)), MAE = mean(abs(err)), n = .N),
+      by = .(tipo, malla, ESTACION)
+    ]
+
+    resultados[[clave]] <- data.table(
+      tipo       = tipo,
+      malla      = nombre_malla,
+      n_nodos    = mesh$n,
+      n_latente  = ncol(A.estud), # incognitas del campo: nodos, o nodos x dias
+      DIC        = m1$dic$dic,
+      WAIC       = m1$waic$waic,
+      LCPO       = lcpo,
+      PIT_mean   = pit_mean,
+      PIT_sd     = pit_sd,
+      rango_km   = rango$mean,
+      rango_q025 = rango$quant0.025,
+      rango_q975 = rango$quant0.975,
+      sigma      = sqrt(varia$mean),
+      rho_ar1    = rho_ar1,
+      RMSE_loso  = rmse,
+      MAE_loso   = mae,
+      Cov95_loso = cov95,
+      minutos    = round(minutos, 1)
+    )
+
+    cat(sprintf(
+      "  nodos=%d  rango=%.2f km  sigma=%.3f  rho=%s  RMSE=%.4f  Cov95=%.1f%%  (%.1f min)\n\n",
+      mesh$n, rango$mean, sqrt(varia$mean),
+      if (is.na(rho_ar1)) "-" else sprintf("%.3f", rho_ar1), rmse, cov95, minutos
+    ))
   }
-
-  # --- PASO 5: inla.stack ----------------------------------------------------
-  # A altera la dimension del predictor lineal, asi que no se puede pasar un
-  # data.frame clasico a inla(). Se empaquetan respuesta, covariables y campo
-  # espacial en el stack:
-  #   A = list(A.estud, 1) -> A.estud proyecta el campo, 1 (identidad) el resto
-  #   El Intercept va DENTRO del stack, como efecto manual.
-  stack.est <- inla.stack(
-    data = list(y_response = df$y),   # se ajusta con TODOS los datos
-    A    = list(A.estud, 1),
-    effects = list(
-      c(s.index, list(Intercept = 1)),
-      as.data.frame(df[, COVARIABLES, with = FALSE])
-    ),
-    tag = "est"
-  )
-
-  # --- PASO 6b: ajuste --------------------------------------------------------
-  # La formula (arriba) lleva -1 para quitar el intercepto automatico de R y
-  # usar el Intercept que viaja dentro del stack.
-  t0 <- Sys.time()
-  m1 <- inla(
-    formula,
-    data   = inla.stack.data(stack.est, spde = spde),
-    family = "gaussian",   # la respuesta ya esta en log: gaussiana, no gamma
-    control.predictor = list(A = inla.stack.A(stack.est), compute = TRUE),
-    control.compute   = list(dic = TRUE, waic = TRUE,return.marginals.predictor = TRUE),
-    control.inla      = list(int.strategy = "eb")  # Empirical Bayes: mas rapido
-  )
-  minutos <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
-
-  # --- PASO 7: rango y varianza en escala fisica (km) ------------------------
-  # INLA estima el campo en escala logaritmica interna (Theta1, Theta2).
-  # inla.spde2.result lo devuelve a rango (km) y varianza marginal.
-  spde.result <- inla.spde2.result(inla = m1, name = "spatial.field",
-                                   spde = spde, do.transf = TRUE)
-
-  rango <- inla.zmarginal(spde.result$marginals.range.nominal[[1]], silent = TRUE)
-  varia <- inla.zmarginal(spde.result$marginals.variance.nominal[[1]], silent = TRUE)
-
-  # --- PASO 8: validacion leave-one-station-out ------------------------------
-  # gcv$mean y gcv$sd son la media y la sd de la distribucion PREDICTIVA de
-  # cada observacion habiendo quitado su estacion entera. La sd ya incluye el
-  # ruido de observacion (a diferencia de summary.fitted.values$sd, que solo
-  # recoge la incertidumbre de la media ajustada), asi que Cov95 se calcula
-  # directamente con ella.
-  gcv <- inla.group.cv(result = m1, groups = grupos)
-
-  err <- gcv$mean - df$y
-
-  # RMSE y MAE en la escala log de la respuesta (LOG_NO2_DIARIO). No se deshace
-  # el log1p: en la escala original el error lo dominarian los dias de episodio
-  # y dejaria de medir la calidad de la interpolacion espacial.
-  rmse <- sqrt(mean(err^2))
-  mae  <- mean(abs(err))
-
-  # Cov95: % de observaciones dentro de su intervalo predictivo del 95%.
-  # El RMSE mide si el punto acierta; Cov95, si la incertidumbre esta bien
-  # calibrada. Muy por debajo de 95 = modelo demasiado confiado; muy por
-  # encima = intervalos inutilmente anchos.
-  cov95 <- 100 * mean(df$y >= gcv$mean - 1.96 * gcv$sd &
-                      df$y <= gcv$mean + 1.96 * gcv$sd)
-
-  # Rho del AR1. Solo existe en el modelo espacio-temporal; en el espacial
-  # queda NA. Al ser dias consecutivos SI es la autocorrelacion de un dia al
-  # siguiente. Si sale pegado a 1, el AR1 ha degenerado en paseo aleatorio y el
-  # modelo esta absorbiendo los datos en vez de explicarlos.
-  fila_rho <- grep("GroupRho", rownames(m1$summary.hyperpar))[1]
-  rho_ar1  <- if (is.na(fila_rho)) NA_real_ else m1$summary.hyperpar$mean[fila_rho]
-
-  # Error por estacion: dice DONDE falla el campo. Se espera que las peores
-  # sean las aisladas (El Pardo) y las mejores las rodeadas de vecinas.
-  por_estacion[[clave]] <- data.table(
-    tipo = tipo, malla = nombre_malla, ESTACION = df$ESTACION, err = err
-  )[, .(RMSE = sqrt(mean(err^2)), MAE = mean(abs(err)), n = .N),
-    by = .(tipo, malla, ESTACION)]
-
-  resultados[[clave]] <- data.table(
-    tipo       = tipo,
-    malla      = nombre_malla,
-    n_nodos    = mesh$n,
-    n_latente  = ncol(A.estud),   # incognitas del campo: nodos, o nodos x dias
-    DIC        = m1$dic$dic,
-    WAIC       = m1$waic$waic,
-    rango_km   = rango$mean,
-    rango_q025 = rango$quant0.025,
-    rango_q975 = rango$quant0.975,
-    sigma      = sqrt(varia$mean),
-    rho_ar1    = rho_ar1,
-    RMSE_loso  = rmse,
-    MAE_loso   = mae,
-    Cov95_loso = cov95,
-    minutos    = round(minutos, 1)
-  )
-
-  cat(sprintf(
-    "  nodos=%d  rango=%.2f km  sigma=%.3f  rho=%s  RMSE=%.4f  Cov95=%.1f%%  (%.1f min)\n\n",
-    mesh$n, rango$mean, sqrt(varia$mean),
-    if (is.na(rho_ar1)) "-" else sprintf("%.3f", rho_ar1), rmse, cov95, minutos))
-}
 }
 
 # ==============================================================================
@@ -262,7 +286,7 @@ for (nombre_malla in MALLAS) {
 # ==============================================================================
 tabla <- rbindlist(resultados)
 tabla[, malla := factor(malla, levels = MALLAS)]
-tabla[, tipo  := factor(tipo,  levels = TIPOS)]
+tabla[, tipo := factor(tipo, levels = TIPOS)]
 setorder(tabla, tipo, malla)
 
 # Estabilidad: cuanto cambian rango y RMSE al pasar a la malla siguiente, DENTRO
@@ -270,9 +294,11 @@ setorder(tabla, tipo, malla)
 # compararia con la ultima del primero, que no tiene sentido).
 # Si apenas se mueven, la malla mas gruesa de las dos ya vale.
 tabla[, d_rango_pct := round(100 * (rango_km - shift(rango_km)) / shift(rango_km), 1),
-      by = tipo]
-tabla[, d_RMSE_pct  := round(100 * (RMSE_loso - shift(RMSE_loso)) / shift(RMSE_loso), 1),
-      by = tipo]
+  by = tipo
+]
+tabla[, d_RMSE_pct := round(100 * (RMSE_loso - shift(RMSE_loso)) / shift(RMSE_loso), 1),
+  by = tipo
+]
 
 cat("--- Resultados ---\n")
 print(tabla)
@@ -283,9 +309,11 @@ print(tabla)
 # ese modelo NO puede presentarse como "el mejor por DIC".
 degenerados <- tabla[!is.na(rho_ar1) & rho_ar1 > 0.99]
 if (nrow(degenerados) > 0) {
-  cat("\n*** AVISO: rho del AR1 pegado a 1 en:",
-      paste(degenerados$malla, collapse = ", "),
-      "\n    El campo espacio-temporal ha degenerado. No usar su DIC.\n")
+  cat(
+    "\n*** AVISO: rho del AR1 pegado a 1 en:",
+    paste(degenerados$malla, collapse = ", "),
+    "\n    El campo espacio-temporal ha degenerado. No usar su DIC.\n"
+  )
 }
 
 tabla_est <- dcast(rbindlist(por_estacion), ESTACION ~ tipo + malla, value.var = "RMSE")

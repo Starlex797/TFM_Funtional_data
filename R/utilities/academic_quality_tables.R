@@ -15,8 +15,31 @@ booktabs_png <- function(data, output_file, title, subtitle, note, widths, align
   title_y <- subtitle_y + 0.28
   top_y <- title_y + 0.22
   height <- top_y + 0.12
-  width <- sum(widths) + 0.36
   left <- 0.18
+
+  # El ancho del lienzo se calculaba solo a partir de las columnas de la tabla
+  # (sum(widths)); cuando el título o el subtítulo eran más largos que eso (p.
+  # ej. tablas de pocas columnas con títulos largos), grid.text los dibujaba
+  # igual y quedaban recortados en el borde derecho del PNG. Se mide el ancho
+  # real del título/subtítulo con su tipografía en un dispositivo temporal y
+  # el lienzo se dimensiona al máximo entre eso y el ancho de las columnas.
+  grDevices::pdf(NULL)
+  title_w <- grid::convertWidth(
+    grid::grobWidth(grid::textGrob(title, gp = grid::gpar(
+      fontfamily = "Arial", fontface = "bold", fontsize = font_size + 3
+    ))),
+    "in", valueOnly = TRUE
+  )
+  subtitle_w <- grid::convertWidth(
+    grid::grobWidth(grid::textGrob(subtitle, gp = grid::gpar(
+      fontfamily = "Arial", fontsize = font_size + 1
+    ))),
+    "in", valueOnly = TRUE
+  )
+  grDevices::dev.off()
+
+  content_w <- max(sum(widths), title_w + 0.06, subtitle_w + 0.06)
+  width <- content_w + 2 * left
   boundaries <- left + c(0, cumsum(widths))
 
   ragg::agg_png(
