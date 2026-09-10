@@ -12,7 +12,7 @@ library(ggplot2) # se necesita ya en el Bloque 3 para el diagnóstico de boundar
 dt_no2_2025 <- readRDS(here("data", "processed", "Contaminacion", "diario", "aire_madrid_2025_No2_trans_diarios1.rds"))
 dt_clima_2025 <- readRDS(here("data", "processed", "Clima", "diario", "meteo_madrid_2025_diario5.rds"))
 
-Variable_estudio <- "LOG_NO2_DIARIO" # Variable de estudio: NO2, Radiacion_Solar, etc.
+Variable_estudio <- "NO2" # Variable de estudio: NO2, Radiacion_Solar, etc.
 
 setDT(dt_no2_2025)
 setDT(dt_clima_2025)
@@ -24,11 +24,20 @@ coords_estaciones <- unique(dt_no2_2025[, .(ESTACION, LONGITUD, LATITUD)])
 # !is.na(Variable_estudio) comprueba el TEXTO "Radiacion_Solar" (nunca es NA):
 # no filtraba nada. get(Variable_estudio) recupera la columna que ese texto
 # nombra, para quedarnos solo con las estaciones que sí miden esa variable.
-coords_estaciones_clima <- unique(
-  dt_clima_2025[!is.na(get(Variable_estudio)), .(ESTACION, LONGITUD, LATITUD)]
-)
+# coords_estaciones_clima <- unique(
+# dt_clima_2025[!is.na(get(Variable_estudio)), .(ESTACION, LONGITUD, LATITUD)]
+# )
 
-datos_a_proyectar <- coords_estaciones
+if (Variable_estudio %in% c("NO2", "DATO_DIARIO", "LOG_NO2_DIARIO")) {
+  datos_a_proyectar <- coords_estaciones
+} else {
+  if (!Variable_estudio %in% names(dt_clima_2025)) {
+    stop("La variable '", Variable_estudio, "' no existe en dt_clima_2025.")
+  }
+  datos_a_proyectar <- unique(
+    dt_clima_2025[!is.na(get(Variable_estudio)), .(ESTACION, LONGITUD, LATITUD)]
+  )
+}
 
 coords_sf <- st_as_sf(datos_a_proyectar, coords = c("LONGITUD", "LATITUD"), crs = 4326) # CRS original en WGS84 (grados)
 coords_utm <- st_transform(coords_sf, 25830) # proyection in utm 30N (EPSG:25830)
@@ -65,9 +74,9 @@ distancia_minima_variable <- function(variable) {
 }
 
 # NO2
-edge_gruesa_NO2 <- c(5, 6)
-edge_media_NO2 <- c(3, 6)
-edge_fina_NO2 <- c(1.86, 6)
+edge_gruesa_NO2 <- c(8, 10)
+edge_media_NO2 <- c(3, 8)
+edge_fina_NO2 <- c(1.86, 10)
 cutoff_NO2 <- 0.79 # Cut off to avoid creating very small triangles between nearby stations. This merges close points into one, preventing tiny triangles.
 
 # Radiacion_Solar
@@ -83,7 +92,7 @@ cutoff_Prec <- distancia_minima_variable("Precipitaciones") # ídem, precipitaci
 # Velocidad_Viento
 edge_gruesa_VV <- c(5, 6)
 edge_media_VV <- c(3, 6)
-edge_fina_VV <- c(1.86, 6)
+edge_fina_VV <- c(1.86, 86)
 cutoff_VV <- distancia_minima_variable("Velocidad_Viento") # ídem, velocidad del viento
 # Presion_Barometrica
 edge_gruesa_PB <- c(5, 6)
@@ -101,6 +110,8 @@ cat(sprintf(
 # edge_*_NO2/cutoff_NO2 sin mirar Variable_estudio -> los bloques _RS/_Prec/
 # _VV/_PB quedaban definidos pero nunca se usaban.
 sufijo_variable <- c(
+  NO2 = "NO2",
+  DATO_DIARIO = "NO2",
   LOG_NO2_DIARIO = "NO2",
   Radiacion_Solar = "RS",
   Precipitaciones = "Prec",
@@ -180,7 +191,7 @@ st_geometry(mapa_distritos_km) <- st_geometry(mapa_distritos_km) / 1000
 # (que son las de NO2: otro conjunto, con otro recuento -> longitudes distintas).
 coords_df <- as.data.frame(coords_matriz)
 colnames(coords_df) <- c("X", "Y")
-coords_df$ESTACION <- coords_estaciones_clima$ESTACION
+coords_df$ESTACION <- datos_a_proyectar$ESTACION
 
 # Paleta y etiquetas compartidas
 etiqueta_estacion <- paste(gsub("_", " ", Variable_estudio), "station")
