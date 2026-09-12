@@ -76,8 +76,8 @@ distancia_minima_variable <- function(variable) {
 # NO2
 edge_gruesa_NO2 <- c(8, 10)
 edge_media_NO2 <- c(3, 8)
-edge_fina_NO2 <- c(1.86, 10)
-cutoff_NO2 <- 0.79 # Cut off to avoid creating very small triangles between nearby stations. This merges close points into one, preventing tiny triangles.
+edge_fina_NO2 <- c(1, 3)
+cutoff_NO2 <- 0.15 # Cut off to avoid creating very small triangles between nearby stations. This merges close points into one, preventing tiny triangles.
 
 # Radiacion_Solar
 edge_gruesa_RS <- c(5, 6)

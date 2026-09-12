@@ -2,19 +2,20 @@
 # COMPARACION DE EFECTOS LINEALES Y RW2 CON SPDE - 2025
 # ==============================================================================
 # Objetivo:
-#   Partir de un modelo INLA-SPDE con todas las covariables lineales y, para
-#   cada una, comparar un candidato RW2 manteniendo las restantes lineales.
-#   El mismo campo espacial se incluye en todos los modelos.
+#   Partir de un modelo INLA-SPDE con todas las covariables lineales y comparar,
+#   para temperatura, radiacion solar y velocidad del viento, tres formas:
+#   lineal original, transformacion parametrica y RW2. Las restantes
+#   covariables permanecen lineales y el campo espacial no cambia.
 #
 # Comparacion principal:
 #   Una unica tabla con WAIC, DIC y RMSE posterior de ajuste. Este RMSE se
 #   obtiene del ajuste INLA ya calculado y se usa como cribado rapido.
 #
 # Diagnostico visual:
-#   Curvas posteriores RW2 por covariable, comparadas con el efecto
-#   lineal del modelo de referencia.
+#   Curvas del efecto lineal, de la transformacion parametrica y del RW2,
+#   con sus intervalos creibles posteriores del 95%.
 #
-# Validacion espacial opcional:
+# Validacion espacial opcional:ss
 #   Si CALCULAR_LOSO = TRUE, se elimina una estacion completa cada vez para
 #   los modelos indicados en MODELOS_LOSO. Sus resultados se guardan aparte.
 # ==============================================================================
@@ -40,6 +41,7 @@ FECHA_FIN <- as.Date("2025-12-31")
 
 # Introducimos las variables.
 COVARIABLES <- c(
+    "Temperatura",
     "Velocidad_Viento",
     "Radiacion_Solar",
     "Humedad_Relativa",
@@ -48,14 +50,24 @@ COVARIABLES <- c(
     "Precipitaciones"
 )
 
+# Para cada variable se compara la forma lineal original, una transformacion
+# parametrica (ya estandarizada en el maestro) y un efecto flexible RW2.
+TRANSFORMACIONES <- c(
+    Temperatura = "Temperatura_log",
+    Radiacion_Solar = "Radiacion_Solar_log",
+    Velocidad_Viento = "Velocidad_Viento_sqrt"
+)
+ETIQUETAS_TRANSFORMACIONES <- c(
+    Temperatura = "Logaritmica",
+    Radiacion_Solar = "Logaritmica",
+    Velocidad_Viento = "Raiz cuadrada"
+)
+
 # Numero de grupos de los efectos RW2.
 N_GRUPOS_RW2 <- c(
+    Temperatura = 40L,
     Velocidad_Viento = 40L,
-    Radiacion_Solar = 40L,
-    Humedad_Relativa = 40L,
-    Presion_Barometrica = 40L,
-    intensidad = 40L,
-    Precipitaciones = 40L
+    Radiacion_Solar = 40L
 )
 ETIQUETAS_RW2 <- c(
     Temperatura = "Temperatura ",
@@ -71,8 +83,9 @@ MALLA <- "media" # "gruesa" | "media" | "fina"
 
 CALCULAR_CPO <- FALSE # No se necesita para la tabla WAIC-DIC-RMSE.
 CALCULAR_LOSO <- FALSE # Cambiar a TRUE solo para validar los candidatos finales.
-# Valida solo los modelos indicados. Anada aqui los candidatos seleccionados.
-MODELOS_LOSO <- c("M4", "M5","M3")
+# Valida solo los candidatos finales indicados despues del cribado rapido.
+# Ejemplo: MODELOS_LOSO <- c("M1", "M2")
+MODELOS_LOSO <- character()
 GUARDAR_MODELOS <- TRUE
 VERBOSE_INLA <- FALSE
 NUM_THREADS <- 5L
@@ -105,7 +118,8 @@ if (!file.exists(ruta_malla)) stop("No existe la malla: ", ruta_malla)
 
 df <- as.data.table(readRDS(ruta_datos))
 columnas_necesarias <- unique(c(
-    "ESTACION", "FECHA", "X_km", "Y_km", RESPUESTA, COVARIABLES
+    "ESTACION", "FECHA", "X_km", "Y_km", RESPUESTA,
+    COVARIABLES, unname(TRANSFORMACIONES)
 ))
 columnas_ausentes <- setdiff(columnas_necesarias, names(df))
 if (length(columnas_ausentes) > 0L) {
@@ -224,6 +238,9 @@ efectos_stack <- data.frame(Intercept = rep(1, nrow(df)))
 for (variable in COVARIABLES) {
     efectos_stack[[variable]] <- df[[variable]]
 }
+for (variable_transformada in unname(TRANSFORMACIONES)) {
+    efectos_stack[[variable_transformada]] <- df[[variable_transformada]]
+}
 for (variable in variables_rw2) {
     nombre_agrupado <- paste0(variable, "_rw2")
     efectos_stack[[nombre_agrupado]] <- df[[nombre_agrupado]]
@@ -246,27 +263,31 @@ stopifnot(
 # ==============================================================================
 # 3. FORMULAS A COMPARAR
 # ==============================================================================
-construir_formula <- function(variable_suave = NULL, forma = "Lineal") {
-    terminos_lineales <- if (is.null(variable_suave)) {
+construir_formula <- function(
+  variable = NULL,
+  tipo = "Lineal",
+  variable_transformada = NULL
+) {
+    terminos_lineales <- if (is.null(variable)) {
         COVARIABLES
     } else {
-        setdiff(COVARIABLES, variable_suave)
+        setdiff(COVARIABLES, variable)
     }
-    termino_suave <- if (is.null(variable_suave)) {
-        character()
-    } else {
-        sprintf(
-            "f(%s_rw2, model = '%s', scale.model = TRUE)",
-            variable_suave,
-            tolower(forma)
-        )
-    }
+    termino_alternativo <- switch(tipo,
+        Lineal = character(),
+        Transformacion = variable_transformada,
+        RW2 = sprintf(
+            "f(%s_rw2, model = 'rw2', scale.model = TRUE)",
+            variable
+        ),
+        stop("Tipo de efecto no reconocido: ", tipo)
+    )
     as.formula(paste(
         "y_response ~ -1 + Intercept +",
         paste(
             c(
                 terminos_lineales,
-                termino_suave,
+                termino_alternativo,
                 "f(campo_espacial, model = spde)"
             ),
             collapse = " + "
@@ -275,25 +296,45 @@ construir_formula <- function(variable_suave = NULL, forma = "Lineal") {
 }
 
 especificaciones_modelos <- rbindlist(list(
-    data.table(Covariable = "Todas", Forma = "Lineal"),
-    rbindlist(lapply(variables_rw2, function(variable) {
-        data.table(Covariable = variable, Forma = "RW2")
+    data.table(
+        Covariable = "Todas",
+        Tipo = "Lineal",
+        Forma = "Lineal original",
+        Variable_modelo = NA_character_
+    ),
+    rbindlist(lapply(names(TRANSFORMACIONES), function(variable) {
+        data.table(
+            Covariable = variable,
+            Tipo = c("Transformacion", "RW2"),
+            Forma = c(ETIQUETAS_TRANSFORMACIONES[[variable]], "RW2"),
+            Variable_modelo = c(
+                TRANSFORMACIONES[[variable]],
+                paste0(variable, "_rw2")
+            )
+        )
     }))
 ))
 especificaciones_modelos[, Id := paste0("M", .I - 1L)]
 especificaciones_modelos[, Modelo := fifelse(
-    Forma == "Lineal",
-    paste0(Id, ": todas lineales"),
-    sprintf("%s: %s %s", Id, Covariable, tolower(Forma))
+    Tipo == "Lineal",
+    paste0(Id, ": todas lineales originales"),
+    sprintf("%s: %s - %s", Id, Covariable, Forma)
 )]
 
 formulas <- setNames(lapply(seq_len(nrow(especificaciones_modelos)), function(i) {
-    if (especificaciones_modelos$Forma[[i]] == "Lineal") {
+    if (especificaciones_modelos$Tipo[[i]] == "Lineal") {
         construir_formula()
     } else {
         construir_formula(
-            especificaciones_modelos$Covariable[[i]],
-            especificaciones_modelos$Forma[[i]]
+            variable = especificaciones_modelos$Covariable[[i]],
+            tipo = especificaciones_modelos$Tipo[[i]],
+            variable_transformada = if (
+                especificaciones_modelos$Tipo[[i]] == "Transformacion"
+            ) {
+                especificaciones_modelos$Variable_modelo[[i]]
+            } else {
+                NULL
+            }
         )
     }
 }), especificaciones_modelos$Id)
@@ -307,11 +348,11 @@ etiquetas_modelos <- setNames(
 # 4. AJUSTE DE LOS MODELOS
 # ==============================================================================
 ajustar_modelo <- function(
-    formula,
-    etiqueta,
-    stack_modelo = inla_stack,
-    calcular_cpo = CALCULAR_CPO,
-    verbose = VERBOSE_INLA
+  formula,
+  etiqueta,
+  stack_modelo = inla_stack,
+  calcular_cpo = CALCULAR_CPO,
+  verbose = VERBOSE_INLA
 ) {
     cat("\nAjustando ", etiqueta, "...\n", sep = "")
     flush.console()
@@ -430,7 +471,7 @@ resumir_modelo <- function(modelo, id_modelo, minutos) {
     resumen_espacial <- resumir_spde(modelo)
 
     data.table(
-        Modelo = id_modelo,
+        Id = id_modelo,
         WAIC = modelo$waic$waic,
         DIC = modelo$dic$dic,
         COV95 = cov95,
@@ -452,14 +493,46 @@ resumir_modelo <- function(modelo, id_modelo, minutos) {
 metricas_completas <- rbindlist(lapply(names(modelos), function(id_modelo) {
     resumir_modelo(
         modelos[[id_modelo]],
-        etiquetas_modelos[[id_modelo]],
+        id_modelo,
         tiempos[[id_modelo]]
     )
 }))
 
+metricas_completas <- merge(
+    especificaciones_modelos,
+    metricas_completas,
+    by = "Id",
+    all.x = TRUE,
+    sort = FALSE
+)
+metricas_completas[, orden_modelo := as.integer(sub("M", "", Id))]
+setorder(metricas_completas, orden_modelo)
+metricas_completas[, orden_modelo := NULL]
+
 # RMSE posterior de ajuste: no necesita volver a ajustar el modelo y, por
 # tanto, permite cribar rapidamente todos los candidatos. No es RMSE LOSO.
-tabla_comparacion <- metricas_completas[, .(Modelo, WAIC, DIC, RMSE)]
+tabla_comparacion <- rbindlist(lapply(names(TRANSFORMACIONES), function(variable) {
+    ids_variable <- c(
+        "M0",
+        especificaciones_modelos[Covariable == variable, Id]
+    )
+    resultado <- metricas_completas[match(ids_variable, Id)]
+    resultado[, Covariable_comparada := variable]
+    resultado[Id == "M0", Forma := "Lineal original"]
+    resultado[, Delta_WAIC := WAIC - min(WAIC, na.rm = TRUE)]
+    resultado[, .(
+        Covariable = Covariable_comparada,
+        Id,
+        Forma,
+        Modelo,
+        WAIC,
+        Delta_WAIC,
+        DIC,
+        RMSE,
+        p_eff_WAIC,
+        minutes
+    )]
+}))
 
 
 # ==============================================================================
@@ -546,9 +619,21 @@ if (CALCULAR_LOSO) {
     }
 
     loso <- lapply(MODELOS_LOSO, function(id_modelo) {
-        calcular_loso(modelos[[id_modelo]], etiquetas_modelos[[id_modelo]])
+        calcular_loso(modelos[[id_modelo]], id_modelo)
     })
     tabla_comparacion_loso <- rbindlist(lapply(loso, `[[`, "global"))
+    tabla_comparacion_loso <- merge(
+        especificaciones_modelos[, .(
+            Modelo = Id,
+            Descripcion = Modelo,
+            Covariable,
+            Forma
+        )],
+        tabla_comparacion_loso,
+        by = "Modelo",
+        all.y = TRUE,
+        sort = FALSE
+    )
     predicciones_loso <- rbindlist(lapply(loso, `[[`, "predictions"))
     metricas_loso_estacion <- rbindlist(lapply(loso, `[[`, "station"))
 }
@@ -557,115 +642,197 @@ if (CALCULAR_LOSO) {
 # ==============================================================================
 # 7. EFECTOS NO LINEALES: DATOS Y GRAFICO
 # ==============================================================================
-extraer_efecto_suave <- function(variable, forma) {
-    nombre_rw2 <- paste0(variable, "_rw2")
-    id_modelo_suave <- especificaciones_modelos[
-        Covariable == variable & Forma == forma,
-        Id
-    ]
-    resumen <- as.data.table(
-        modelos[[id_modelo_suave]]$summary.random[[nombre_rw2]]
-    )
-    if (nrow(resumen) == 0L) {
-        stop("No se encontro el efecto posterior ", forma, " de ", variable, ".")
+extraer_coeficiente <- function(modelo, termino) {
+    if (!termino %in% rownames(modelo$summary.fixed)) {
+        stop("No se encontro el coeficiente fijo de ", termino, ".")
     }
-    resumen_lineal <- modelos$M0$summary.fixed[
-        variable,
-        ,
-        drop = FALSE
-    ]
-    x <- as.numeric(resumen$ID)
-    x_centrada <- x - mean(x)
-    efecto_lineal <- resumen_lineal[1L, "mean"] * x_centrada
-    limite_lineal_1 <- resumen_lineal[1L, "0.025quant"] * x_centrada
-    limite_lineal_2 <- resumen_lineal[1L, "0.975quant"] * x_centrada
+    resumen <- modelo$summary.fixed[termino, , drop = FALSE]
+    if (nrow(resumen) != 1L) {
+        stop("No se encontro el coeficiente fijo de ", termino, ".")
+    }
+    c(
+        mean = unname(resumen[1L, "mean"]),
+        lower = unname(resumen[1L, "0.025quant"]),
+        upper = unname(resumen[1L, "0.975quant"])
+    )
+}
 
+curva_coeficiente <- function(
+  soporte,
+  z,
+  coeficiente,
+  variable,
+  forma,
+  modelo
+) {
+    extremo_1 <- coeficiente[["lower"]] * z
+    extremo_2 <- coeficiente[["upper"]] * z
     data.table(
         Covariable = etiquetas_grafico_rw2[[variable]],
         variable = variable,
         Forma = forma,
-        Modelo = etiquetas_modelos[[id_modelo_suave]],
-        x = x,
-        suave_mean = resumen$mean,
-        suave_lower = resumen$`0.025quant`,
-        suave_upper = resumen$`0.975quant`,
-        linear_mean = efecto_lineal,
-        linear_lower = pmin(limite_lineal_1, limite_lineal_2),
-        linear_upper = pmax(limite_lineal_1, limite_lineal_2)
-    )[order(x)]
+        Modelo = modelo,
+        x = soporte,
+        effect_mean = coeficiente[["mean"]] * z,
+        effect_lower = pmin(extremo_1, extremo_2),
+        effect_upper = pmax(extremo_1, extremo_2)
+    )
 }
 
-efectos_suaves <- rbindlist(lapply(variables_rw2, function(variable) {
-    extraer_efecto_suave(variable, "RW2")
-}))
-efectos_lineales <- unique(efectos_suaves[, .(
-    Covariable,
-    variable,
-    x,
-    linear_mean,
-    linear_lower,
-    linear_upper
-)])
+extraer_comparacion_efectos <- function(variable) {
+    variable_transformada <- TRANSFORMACIONES[[variable]]
+    variable_rw2 <- paste0(variable, "_rw2")
+    variable_raw <- paste0(variable, "_raw")
+    variable_eje <- if (variable_raw %in% names(df)) variable_raw else variable
 
-capas_efectos <- function(datos_suaves, datos_lineales) {
-    ggplot() +
-    geom_ribbon(
-        data = datos_suaves,
+    soporte <- df[, .(
+        x = mean(get(variable_eje)),
+        z_lineal = mean(get(variable)),
+        z_transformada = mean(get(variable_transformada))
+    ), by = .(nivel = get(variable_rw2))]
+    soporte[, nivel := as.numeric(nivel)]
+    setorder(soporte, nivel)
+
+    # Se centran las contribuciones parametricas para compararlas con el RW2,
+    # que INLA estima bajo una restriccion de suma cero.
+    soporte[, z_lineal := z_lineal - mean(df[[variable]])]
+    soporte[, z_transformada :=
+        z_transformada - mean(df[[variable_transformada]])]
+
+    id_transformacion <- especificaciones_modelos[
+        Covariable == variable & Tipo == "Transformacion",
+        Id
+    ]
+    id_rw2 <- especificaciones_modelos[
+        Covariable == variable & Tipo == "RW2",
+        Id
+    ]
+
+    curva_lineal <- curva_coeficiente(
+        soporte = soporte$x,
+        z = soporte$z_lineal,
+        coeficiente = extraer_coeficiente(modelos$M0, variable),
+        variable = variable,
+        forma = "Lineal original",
+        modelo = etiquetas_modelos[["M0"]]
+    )
+    curva_transformada <- curva_coeficiente(
+        soporte = soporte$x,
+        z = soporte$z_transformada,
+        coeficiente = extraer_coeficiente(
+            modelos[[id_transformacion]],
+            variable_transformada
+        ),
+        variable = variable,
+        forma = "Transformacion parametrica",
+        modelo = etiquetas_modelos[[id_transformacion]]
+    )
+
+    resumen_rw2 <- as.data.table(
+        modelos[[id_rw2]]$summary.random[[variable_rw2]]
+    )
+    if (!nrow(resumen_rw2)) {
+        stop("No se encontro el efecto RW2 de ", variable, ".")
+    }
+    resumen_rw2[, nivel := as.numeric(ID)]
+    curva_rw2 <- merge(
+        soporte[, .(nivel, x)],
+        resumen_rw2[, .(
+            nivel,
+            effect_mean = mean,
+            effect_lower = `0.025quant`,
+            effect_upper = `0.975quant`
+        )],
+        by = "nivel",
+        all.x = TRUE,
+        sort = FALSE
+    )
+    if (anyNA(curva_rw2[, .(effect_mean, effect_lower, effect_upper)])) {
+        stop("No se pudo alinear el soporte agrupado y el resumen RW2 de ", variable, ".")
+    }
+    curva_rw2[, `:=`(
+        Covariable = etiquetas_grafico_rw2[[variable]],
+        variable = variable,
+        Forma = "RW2",
+        Modelo = etiquetas_modelos[[id_rw2]]
+    )]
+    curva_rw2 <- curva_rw2[, .(
+        Covariable,
+        variable,
+        Forma,
+        Modelo,
+        x,
+        effect_mean,
+        effect_lower,
+        effect_upper
+    )]
+
+    rbindlist(list(curva_lineal, curva_transformada, curva_rw2))
+}
+
+efectos_comparacion <- rbindlist(lapply(
+    names(TRANSFORMACIONES),
+    extraer_comparacion_efectos
+))
+efectos_comparacion[, Forma := factor(
+    Forma,
+    levels = c("Lineal original", "Transformacion parametrica", "RW2")
+)]
+
+capas_efectos <- function(datos) {
+    ggplot(
+        datos,
         aes(
             x = x,
-            ymin = suave_lower,
-            ymax = suave_upper,
+            y = effect_mean,
+            color = Forma,
             fill = Forma,
+            linetype = Forma,
             group = Forma
-        ),
-        alpha = 0.14
+        )
     ) +
-    geom_ribbon(
-        data = datos_lineales,
-        aes(x = x, ymin = linear_lower, ymax = linear_upper),
-        inherit.aes = FALSE,
-        fill = "#D55E00",
-        alpha = 0.08
-    ) +
-    geom_line(
-        data = datos_suaves,
-        aes(x = x, y = suave_mean, color = Forma, group = Forma),
-        linewidth = 1
-    ) +
-    geom_line(
-        data = datos_lineales,
-        aes(x = x, y = linear_mean, color = "Lineal"),
-        inherit.aes = FALSE,
-        linewidth = 0.9,
-        linetype = "dashed"
-    ) +
-    geom_hline(yintercept = 0, color = "grey55", linewidth = 0.35) +
-    scale_color_manual(values = c(
-        Lineal = "#D55E00",
-        RW2 = "#0072B2"
-    )) +
-    scale_fill_manual(values = c(
-        RW2 = "#56B4E9"
-    )) +
-    guides(fill = "none")
+        geom_ribbon(
+            aes(ymin = effect_lower, ymax = effect_upper),
+            color = NA,
+            alpha = 0.10
+        ) +
+        geom_line(linewidth = 0.95) +
+        geom_hline(yintercept = 0, color = "grey55", linewidth = 0.35) +
+        scale_color_manual(values = c(
+            "Lineal original" = "#D55E00",
+            "Transformacion parametrica" = "#009E73",
+            "RW2" = "#0072B2"
+        )) +
+        scale_fill_manual(values = c(
+            "Lineal original" = "#D55E00",
+            "Transformacion parametrica" = "#009E73",
+            "RW2" = "#56B4E9"
+        )) +
+        scale_linetype_manual(values = c(
+            "Lineal original" = "dashed",
+            "Transformacion parametrica" = "dotdash",
+            "RW2" = "solid"
+        )) +
+        guides(fill = "none", linetype = "none")
 }
 
-n_columnas_grafico <- if (length(variables_rw2) <= 3L) 1L else 2L
-n_filas_grafico <- ceiling(length(variables_rw2) / n_columnas_grafico)
+n_columnas_grafico <- 1L
+n_filas_grafico <- length(variables_rw2)
 
-grafico_efectos <- capas_efectos(efectos_suaves, efectos_lineales) +
+grafico_efectos <- capas_efectos(efectos_comparacion) +
     facet_wrap(
         ~Covariable,
         scales = "free",
         ncol = n_columnas_grafico
     ) +
     labs(
-        title = "Efectos lineales frente a efectos suaves RW2",
+        title = "Forma lineal, transformacion parametrica y RW2",
         subtitle = paste(
-            "Cada panel usa su propia escala; las bandas representan los",
+            "Log para temperatura y radiacion; raiz cuadrada para viento.",
+            "Las bandas representan los",
             "intervalos creibles posteriores del 95%"
         ),
-        x = "Valor estandarizado de la covariable",
+        x = "Valor de la covariable (escala original si esta disponible)",
         y = "Contribucion al predictor lineal",
         color = NULL
     ) +
@@ -719,7 +886,7 @@ ruta_grafico_efectos <- guardar_png_seguro(
     grafico = grafico_efectos,
     ruta = file.path(
         DIR_FIGURAS,
-        sprintf("efectos_rw2_vs_lineal_%d.png", ANIO)
+        sprintf("efectos_transformacion_vs_rw2_%d.png", ANIO)
     ),
     width = if (n_columnas_grafico == 1L) 8 else 12,
     height = max(6, 3.2 * n_filas_grafico)
@@ -729,21 +896,18 @@ ruta_grafico_efectos <- guardar_png_seguro(
 rutas_graficos_individuales <- setNames(
     vapply(variables_rw2, function(variable) {
         variable_actual <- variable
-        datos_suaves_variable <- efectos_suaves[variable == variable_actual]
-        datos_lineales_variable <- efectos_lineales[
-            variable == variable_actual
-        ]
-        grafico_variable <- capas_efectos(
-            datos_suaves_variable,
-            datos_lineales_variable
-        ) +
+        datos_variable <- efectos_comparacion[variable == variable_actual]
+        grafico_variable <- capas_efectos(datos_variable) +
             labs(
                 title = paste("Efecto de", etiquetas_grafico_rw2[[variable]]),
-                subtitle = paste(
-                    "Curva RW2 e intervalo creible del 95%;",
-                    "la linea discontinua es el efecto lineal"
+                subtitle = sprintf(
+                    "Lineal original, %s y RW2; intervalos creibles del 95%%",
+                    tolower(ETIQUETAS_TRANSFORMACIONES[[variable]])
                 ),
-                x = etiquetas_grafico_rw2[[variable]],
+                x = paste0(
+                    etiquetas_grafico_rw2[[variable]],
+                    " (escala original si esta disponible)"
+                ),
                 y = "Contribucion al predictor lineal",
                 color = NULL
             ) +
@@ -757,7 +921,7 @@ rutas_graficos_individuales <- setNames(
             grafico = grafico_variable,
             ruta = file.path(
                 DIR_FIGURAS,
-                sprintf("efecto_rw2_%s_%d.png", variable, ANIO)
+                sprintf("comparacion_formas_%s_%d.png", variable, ANIO)
             ),
             width = 8,
             height = 5.5
@@ -773,7 +937,10 @@ rutas_graficos_individuales <- setNames(
 fwrite(tabla_comparacion, file.path(DIR_OUT, "comparacion_modelos_2025.csv"))
 fwrite(metricas_completas, file.path(DIR_OUT, "metricas_completas_2025.csv"))
 fwrite(soporte_grupos_rw2, file.path(DIR_OUT, "soporte_grupos_rw_2025.csv"))
-fwrite(efectos_suaves, file.path(DIR_OUT, "efectos_rw2_2025.csv"))
+fwrite(
+    efectos_comparacion,
+    file.path(DIR_OUT, "efectos_lineal_transformacion_rw2_2025.csv")
+)
 
 extraer_resumen <- function(modelo, id_modelo, componente) {
     tabla <- as.data.table(modelo[[componente]], keep.rownames = "term")
@@ -825,6 +992,7 @@ configuracion <- list(
     end_date = FECHA_FIN,
     response = RESPUESTA,
     covariates = COVARIABLES,
+    transformations = TRANSFORMACIONES,
     mesh = MALLA,
     mesh_vertices = mesh$n,
     prior_range = PRIORS_SPDE[[ESCALA]]$prior.range,
@@ -850,7 +1018,7 @@ if (GUARDAR_MODELOS) {
             configuration = configuracion,
             comparison = tabla_comparacion,
             comparison_loso = tabla_comparacion_loso,
-            smooth_effects = efectos_suaves,
+            comparison_effects = efectos_comparacion,
             plot_files = list(
                 combined = ruta_grafico_efectos,
                 individual = rutas_graficos_individuales
@@ -886,10 +1054,15 @@ formatear <- function(x, digitos = 3L) {
 }
 
 tabla_academica <- tabla_para_presentar[, .(
-    Model = Modelo,
+    Variable = gsub("_", " ", Covariable),
+    Model = Id,
+    Form = Forma,
     WAIC = formatear(WAIC, 1L),
+    `Delta WAIC` = formatear(Delta_WAIC, 1L),
     DIC = formatear(DIC, 1L),
-    RMSE = formatear(RMSE, 3L)
+    RMSE = formatear(RMSE, 3L),
+    `p eff` = formatear(p_eff_WAIC, 1L),
+    Minutes = formatear(minutes, 2L)
 )]
 
 ruta_tabla_comparacion <- file.path(
@@ -899,7 +1072,7 @@ ruta_tabla_comparacion <- file.path(
 ruta_tabla_comparacion <- booktabs_png(
     tabla_academica,
     ruta_tabla_comparacion,
-    title = "Comparacion INLA-SPDE: efectos lineales y RW2",
+    title = "Comparacion INLA-SPDE de formas funcionales",
     subtitle = sprintf(
         "%s; malla %s (%d vertices); RW2 groups (%s): %s",
         metodo_tabla,
@@ -912,16 +1085,17 @@ ruta_tabla_comparacion <- booktabs_png(
         )
     ),
     note = paste0(
-        "Valores menores de WAIC, DIC y RMSE son mejores. Compare cada candidato ",
-        "RW2 con M0 (todas lineales). El RMSE de esta tabla es optimista y se ",
+        "Cada bloque compara la forma lineal original, la transformacion y RW2; ",
+        "Delta WAIC se calcula dentro de cada variable. Valores menores son mejores. ",
+        "El RMSE de esta tabla es optimista y se ",
         "usa solo para el cribado; confirme los candidatos finales activando ",
         "LOSO. Todos los modelos usan las mismas ",
         "observaciones, covariables, verosimilitud y opciones de integracion; ",
         "solo cambia un efecto cada vez y todos incluyen el mismo campo espacial SPDE."
     ),
-    widths = c(3.10, 0.90, 0.90, 1.15),
-    align = c("left", rep("right", 3)),
-    font_size = 8.5,
+    widths = c(1.65, 0.55, 1.55, 0.85, 0.90, 0.85, 0.85, 0.70, 0.75),
+    align = c("left", "center", "left", rep("right", 6)),
+    font_size = 7.8,
     row_height = 0.30
 )
 
@@ -943,5 +1117,5 @@ if (CALCULAR_LOSO) {
     )
 }
 cat("\nTabla CSV: ", file.path(DIR_OUT, "comparacion_modelos_2025.csv"), "\n", sep = "")
-cat("Grafico lineal/RW2: ", ruta_grafico_efectos, "\n", sep = "")
+cat("Grafico lineal/transformacion/RW2: ", ruta_grafico_efectos, "\n", sep = "")
 cat("Tabla PNG: ", ruta_tabla_comparacion, "\n", sep = "")

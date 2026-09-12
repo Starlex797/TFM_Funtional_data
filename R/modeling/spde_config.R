@@ -33,9 +33,9 @@
 # ==============================================================================
 
 PRIORS_SPDE <- list(
-  DIARIO = list(prior.range = c(9.3, 0.5), prior.sigma = c(0.6, 0.5)),
-  HORARIO = list(prior.range = c(9.3, 0.5), prior.sigma = c(0.6, 0.5)),
-  MENSUAL = list(prior.range = c(9.3, 0.5), prior.sigma = c(0.6, 0.5))
+  DIARIO = list(prior.range = c(9.3, 0.5), prior.sigma = c(0.6, 0.2)),
+  HORARIO = list(prior.range = c(9.3, 0.5), prior.sigma = c(0.6, 0.2)),
+  MENSUAL = list(prior.range = c(9.3, 0.5), prior.sigma = c(0.6, 0.2))
 )
 
 #' Construye el objeto SPDE con los PC priors del proyecto.
@@ -49,8 +49,10 @@ PRIORS_SPDE <- list(
 crear_spde <- function(malla, escala = "DIARIO",
                        prior.range = NULL, prior.sigma = NULL) {
   if (!escala %in% names(PRIORS_SPDE)) {
-    stop("Escala '", escala, "' sin priors definidos. Válidas: ",
-         paste(names(PRIORS_SPDE), collapse = ", "))
+    stop(
+      "Escala '", escala, "' sin priors definidos. Válidas: ",
+      paste(names(PRIORS_SPDE), collapse = ", ")
+    )
   }
   p <- PRIORS_SPDE[[escala]]
   if (!is.null(prior.range)) p$prior.range <- prior.range
