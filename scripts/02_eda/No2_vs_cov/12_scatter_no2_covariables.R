@@ -100,7 +100,7 @@ estacion_anio_var <- function(dt) {
 
 cat("Cargando maestro DIARIO 2025...\n")
 dt_d <- readRDS(here(
-  "data", "processed", "Maestro", "diario",
+  "data", "processed", "Maestro", "2025",
   "dataset_maestro_inla_2025_DIARIO.rds"
 ))
 dt_d <- dt_d[!is.na(DATO_DIARIO)]
@@ -335,11 +335,193 @@ for (vi in vars_cov) {
 }
 
 # ==============================================================================
-# 9. RESUMEN
+# 9. TRANSFORMACIONES CANDIDATAS PARA LINEALIZAR TRES COVARIABLES
+# ==============================================================================
+# Se usa log(NO2 + 1), que es la respuesta de los modelos gaussianos INLA.
+# Cada panel representa una transformacion de X y muestra el ajuste lineal y su
+# R2. La transformacion con mayor R2 solo es una candidata exploratoria: la
+# decision final debe confirmarse mediante WAIC y validacion cruzada.
+
+set.seed(4827)
+
+dir_trans_d <- file.path(dir_d, "transformaciones_linealidad")
+dir_trans_h <- file.path(dir_h, "transformaciones_linealidad")
+dir.create(dir_trans_d, recursive = TRUE, showWarnings = FALSE)
+dir.create(dir_trans_h, recursive = TRUE, showWarnings = FALSE)
+
+transformar_x <- function(x, variable) {
+  centro <- mean(x, na.rm = TRUE)
+
+  switch(
+    variable,
+    temperatura = list(
+      "Original: x" = x,
+      "Cuadratica centrada: (x - media)^2" = (x - centro)^2,
+      "Cubica centrada: (x - media)^3" = (x - centro)^3,
+      "Log desplazado: log(x - min + 1)" = log(x - min(x, na.rm = TRUE) + 1)
+    ),
+    radiacion = list(
+      "Original: x" = x,
+      "Raiz cuadrada: sqrt(x)" = sqrt(pmax(x, 0)),
+      "Logaritmica: log(x + 1)" = log1p(pmax(x, 0)),
+      "Cuadratica: x^2" = x^2
+    ),
+    viento = list(
+      "Original: x" = x,
+      "Raiz cuadrada: sqrt(x)" = sqrt(pmax(x, 0)),
+      "Logaritmica: log(x + 1)" = log1p(pmax(x, 0)),
+      "Inversa: 1 / (x + 1)" = 1 / (pmax(x, 0) + 1),
+      "Cuadratica: x^2" = x^2
+    ),
+    stop("Variable sin transformaciones definidas: ", variable)
+  )
+}
+
+hacer_scatter_transformaciones <- function(
+    datos, col_x, col_y, variable, label_variable, escala,
+    punto_size, punto_alpha, max_puntos = 40000L) {
+  dt_completo <- datos[
+    is.finite(get(col_x)) & is.finite(get(col_y)),
+    .(ESTACION, X_original = get(col_x), Y = get(col_y))
+  ]
+  if (nrow(dt_completo) < 3L) {
+    stop("No hay suficientes observaciones para ", label_variable, " (", escala, ").")
+  }
+
+  transformaciones_completas <- transformar_x(dt_completo$X_original, variable)
+  r2 <- vapply(transformaciones_completas, function(x_transformada) {
+    summary(lm(dt_completo$Y ~ x_transformada))$r.squared
+  }, numeric(1))
+
+  indices_plot <- if (nrow(dt_completo) > max_puntos) {
+    sample.int(nrow(dt_completo), max_puntos)
+  } else {
+    seq_len(nrow(dt_completo))
+  }
+
+  niveles <- names(transformaciones_completas)
+  etiquetas_panel <- sprintf("%s\nR2 = %.3f", niveles, r2)
+  names(etiquetas_panel) <- niveles
+
+  dt_plot <- rbindlist(lapply(niveles, function(nombre) {
+    data.table(
+      ESTACION = dt_completo$ESTACION[indices_plot],
+      X = transformaciones_completas[[nombre]][indices_plot],
+      Y = dt_completo$Y[indices_plot],
+      Transformacion = nombre
+    )
+  }))
+  dt_plot[, Panel := factor(
+    etiquetas_panel[Transformacion],
+    levels = etiquetas_panel
+  )]
+
+  ggplot(dt_plot, aes(x = X, y = Y, color = ESTACION)) +
+    geom_point(size = punto_size, alpha = punto_alpha, na.rm = TRUE) +
+    geom_smooth(
+      aes(group = 1),
+      method = "lm", formula = y ~ x,
+      se = FALSE, color = "black", linewidth = 0.7
+    ) +
+    facet_wrap(~Panel, scales = "free_x", ncol = 2) +
+    scale_color_manual(values = paleta_est, name = "Estacion") +
+    labs(
+      title = sprintf(
+        "Transformaciones de %s frente a log(NO2 + 1)",
+        label_variable
+      ),
+      subtitle = sprintf(
+        "Escala %s, Madrid 2025 | R2 del ajuste lineal calculado con %s observaciones",
+        escala, format(nrow(dt_completo), big.mark = ".")
+      ),
+      x = NULL,
+      y = "log(NO2 + 1)",
+      caption = paste(
+        "La linea negra es el ajuste lineal de cada transformacion.",
+        "Un R2 mayor indica mayor linealidad marginal, no causalidad."
+      )
+    ) +
+    tema_scatter(base_size = 10) +
+    guides(color = guide_legend(
+      ncol = 4,
+      override.aes = list(size = 2.5, alpha = 0.9)
+    ))
+}
+
+vars_transformar <- list(
+  list(
+    variable = "temperatura",
+    col_d = "Temperatura_raw", col_h = "Temperatura_raw",
+    label = "temperatura"
+  ),
+  list(
+    variable = "radiacion",
+    col_d = col_radiacion_d, col_h = col_radiacion_h,
+    label = "radiacion solar"
+  ),
+  list(
+    variable = "viento",
+    col_d = col_viento_d, col_h = col_viento_h,
+    label = "velocidad del viento"
+  )
+)
+
+cat("\n--- Generando scatter plots de transformaciones ---\n")
+archivos_transformaciones <- character()
+
+for (vi in vars_transformar) {
+  configuraciones <- list(
+    list(
+      datos = dt_d, col_x = vi$col_d, col_y = "LOG_NO2_DIARIO",
+      escala = "diaria", dir = dir_trans_d,
+      punto_size = 0.7, punto_alpha = 0.18
+    ),
+    list(
+      datos = dt_h, col_x = vi$col_h, col_y = "LOG_NO2_HORARIO",
+      escala = "horaria", dir = dir_trans_h,
+      punto_size = 0.3, punto_alpha = 0.08
+    )
+  )
+
+  for (cfg in configuraciones) {
+    if (length(cfg$col_x) != 1L || !cfg$col_x %in% names(cfg$datos)) {
+      cat(sprintf("  [SKIP %s] %s\n", cfg$escala, vi$variable))
+      next
+    }
+
+    grafico <- hacer_scatter_transformaciones(
+      datos = cfg$datos,
+      col_x = cfg$col_x,
+      col_y = cfg$col_y,
+      variable = vi$variable,
+      label_variable = vi$label,
+      escala = cfg$escala,
+      punto_size = cfg$punto_size,
+      punto_alpha = cfg$punto_alpha
+    )
+    archivo <- file.path(
+      cfg$dir,
+      sprintf(
+        "scatter_transformaciones_%s_%s_2025.png",
+        cfg$escala, vi$variable
+      )
+    )
+    ggsave(archivo, grafico, width = 13, height = 9, dpi = 220, bg = "white")
+    archivos_transformaciones <- c(archivos_transformaciones, archivo)
+    cat(sprintf("  OK [%s] %s\n", cfg$escala, basename(archivo)))
+  }
+}
+
+# ==============================================================================
+# 10. RESUMEN
 # ==============================================================================
 
 cat("==============================================================\n")
 cat(sprintf("  Covariables procesadas : %d\n", length(vars_cov)))
 cat(sprintf("  PNG diarios   (%d)  \u2192  %s\n", length(vars_cov), dir_d))
 cat(sprintf("  PNG horarios  (%d)  \u2192  %s\n", length(vars_cov), dir_h))
+cat(sprintf(
+  "  PNG transformaciones (%d)\n",
+  length(archivos_transformaciones)
+))
 cat("==============================================================\n")

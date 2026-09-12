@@ -33,7 +33,7 @@ FECHA_INICIO <- as.Date("2025-01-01")
 N_DIAS <- 60
 
 # Estas son las que van en la formula. Si se anade o quita una aqui, hay que
-# tocarla tambien en las dos formulas del bucle (estan escritas a mano, a
+# tocarla tambien en las dos formulas del bucle (estn escritas a mano, a
 # proposito, para que se lea que entra en cada modelo).
 COVARIABLES <- c("intensidad", "Temperatura", "Velocidad_Viento")
 

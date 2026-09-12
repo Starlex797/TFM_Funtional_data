@@ -37,14 +37,14 @@ library(here)
 
 # NULL = usa todos los años que tengan maestro diario en
 # data/processed/Maestro/<ANIO>/. Para limitar el rango, p.ej. c(2024, 2025).
-ANIOS <- c(2020)
+ANIOS <- c(2023:2025)
 
 # Periodo a conservar en el maestro de salida. NULL en ambos = todo lo cargado
 # en ANIOS. Acepta Date o texto "YYYY-MM-DD". Ejemplo: primer semestre de 2020:
 #   FECHA_INICIO <- "2020-01-01"
 #   FECHA_FIN    <- "2020-06-30"
-FECHA_INICIO <- "2020-01-01"
-FECHA_FIN <- "2020-06-30"
+FECHA_INICIO <- "2023-01-01"
+FECHA_FIN <- "2025-12-31"
 
 dir_maestro <- here("data", "processed", "Maestro")
 ruta_maestro_anio <- function(a) {
@@ -58,7 +58,7 @@ ruta_out <- function(fecha_min, fecha_max) {
   here(
     "data", "processed", "Maestro", "diario",
     sprintf(
-      "dataset_maestro_inla_%s_%s_DIARIO.rds",
+      "dataset_maestro_inla_%s_%s_DIARIO2.rds",
       format(fecha_min, "%Y%m%d"), format(fecha_max, "%Y%m%d")
     )
   )

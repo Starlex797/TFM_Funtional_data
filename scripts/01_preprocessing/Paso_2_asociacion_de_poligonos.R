@@ -20,16 +20,14 @@ sf_use_s2(FALSE)
 # BLOCK 0: CONFIGURATION (Only change the paths here!)
 # ==============================================================================
 
-ANIO <- 2019
+ANIO <- 2025
 DIA_DIAGNOSTICO <- NULL
 HORA_DIAGNOSTICO <- NULL
 
-ruta_no2 <- here("data", "processed", "Contaminacion", "horario", paste0("aire_madrid_", ANIO, "_No2_horarios1.rds"))
-ruta_trafico <- here("data", "processed", "Trafico", "Horario_Barrio", ANIO, paste0("trafico_madrid_", ANIO, "_horario_barrio1.rds"))
-ruta_meteo <- here("data", "processed", "Clima", "horario", paste0("meteo_madrid_", ANIO, "_horario5.rds"))
+ruta_no2 <- here("data", "processed", "Contaminacion", "diario", paste0("aire_madrid_", ANIO, "_No2_trans_diarios1.rds"))
+ruta_trafico <- here("data", "processed", "Trafico", "Diario_Barrio", ANIO, paste0("trafico_madrid_", ANIO, "_diario_barrio1.rds"))
+ruta_meteo <- here("data", "processed", "Clima", "diario", paste0("meteo_madrid_", ANIO, "_diario5.rds"))
 
-
-# 2. OUTPUT paths
 # Output paths are set after Block 1 detects the temporal scale
 
 # ==============================================================================
@@ -137,11 +135,15 @@ academic_name_en <- function(x) {
     ocupacion = "Traffic occupancy",
     carga = "Traffic load",
     Temperatura = "Temperature",
+    Temperatura_log = "Log-transformed temperature",
     Humedad_Relativa = "Relative humidity",
     Precipitaciones = "Precipitation",
+    Llueve = "Rain indicator",
     Presion_Barometrica = "Barometric pressure",
     Radiacion_Solar = "Solar radiation",
-    Velocidad_Viento = "Wind speed"
+    Radiacion_Solar_log = "Log-transformed solar radiation",
+    Velocidad_Viento = "Wind speed",
+    Velocidad_Viento_sqrt = "Square-root-transformed wind speed"
   )
   values <- as.character(x)
   is_raw <- grepl("_raw$", values)
@@ -462,6 +464,45 @@ if (length(faltan_maestro) > 0) {
 # todos los días del año y los NA se dejan tal cual para tratarlos en el modelo.
 
 # ==============================================================================
+# Indicador binario calculado sobre la precipitacion original en milimetros,
+# antes de estandarizarla: 0 = no llueve (< 1 mm), 1 = llueve (>= 1 mm).
+# Si falta la precipitacion, el indicador tambien queda como NA.
+dt_maestro[, Llueve := fifelse(
+  is.na(Precipitaciones),
+  NA_integer_,
+  as.integer(Precipitaciones >= 1)
+)]
+
+# Transformaciones no lineales calculadas en las unidades originales.
+# Se conservan las variables originales y se crean columnas nuevas.
+TEMP_LOG_OFFSET_C <- 20
+if (any(dt_maestro$Temperatura + TEMP_LOG_OFFSET_C <= 0, na.rm = TRUE)) {
+  stop(
+    "No se puede calcular Temperatura_log: existen temperaturas <= -",
+    TEMP_LOG_OFFSET_C, " grados C."
+  )
+}
+
+n_radiacion_negativa <- sum(dt_maestro$Radiacion_Solar < 0, na.rm = TRUE)
+n_viento_negativo <- sum(dt_maestro$Velocidad_Viento < 0, na.rm = TRUE)
+
+if (n_radiacion_negativa > 0L) {
+  warning(
+    n_radiacion_negativa,
+    " valores negativos de Radiacion_Solar se sustituyen por 0 antes del logaritmo."
+  )
+}
+if (n_viento_negativo > 0L) {
+  warning(
+    n_viento_negativo,
+    " valores negativos de Velocidad_Viento se sustituyen por 0 antes de la raiz cuadrada."
+  )
+}
+
+dt_maestro[, Temperatura_log := log(Temperatura + TEMP_LOG_OFFSET_C)]
+dt_maestro[, Radiacion_Solar_log := log1p(pmax(Radiacion_Solar, 0))]
+dt_maestro[, Velocidad_Viento_sqrt := sqrt(pmax(Velocidad_Viento, 0))]
+
 # BLOCK 6: COVARIATE STANDARDIZATION (Z-SCORE)
 # ==============================================================================
 # Traffic
@@ -470,8 +511,13 @@ dt_maestro[, carga_raw := carga]
 dt_maestro[, intensidad := scale(intensidad)[, 1]]
 dt_maestro[, carga := scale(carga)[, 1]]
 
-# Climate: las seis variables interpoladas, ya validadas más arriba.
-cols_clima_std <- cols_clima
+# Climate: variables interpoladas y transformaciones candidatas.
+cols_clima_transformadas <- c(
+  "Temperatura_log",
+  "Radiacion_Solar_log",
+  "Velocidad_Viento_sqrt"
+)
+cols_clima_std <- c(cols_clima, cols_clima_transformadas)
 
 for (v in cols_clima_std) {
   raw_name <- paste0(v, "_raw")

@@ -2,7 +2,8 @@
 
 booktabs_png <- function(data, output_file, title, subtitle, note, widths, align,
                          group_starts = integer(), font_size = 9,
-                         row_height = 0.25, resolution = 200) {
+                         row_height = 0.25, resolution = 200,
+                         font_family = "sans") {
   data <- as.data.frame(data, check.names = FALSE)
   if (length(widths) != ncol(data) || length(align) != ncol(data)) {
     stop("Table widths and alignments must match the number of columns.")
@@ -23,16 +24,16 @@ booktabs_png <- function(data, output_file, title, subtitle, note, widths, align
   # igual y quedaban recortados en el borde derecho del PNG. Se mide el ancho
   # real del título/subtítulo con su tipografía en un dispositivo temporal y
   # el lienzo se dimensiona al máximo entre eso y el ancho de las columnas.
-  grDevices::pdf(NULL)
+  grDevices::pdf(NULL, family = font_family)
   title_w <- grid::convertWidth(
     grid::grobWidth(grid::textGrob(title, gp = grid::gpar(
-      fontfamily = "Arial", fontface = "bold", fontsize = font_size + 3
+      fontfamily = font_family, fontface = "bold", fontsize = font_size + 3
     ))),
     "in", valueOnly = TRUE
   )
   subtitle_w <- grid::convertWidth(
     grid::grobWidth(grid::textGrob(subtitle, gp = grid::gpar(
-      fontfamily = "Arial", fontsize = font_size + 1
+      fontfamily = font_family, fontsize = font_size + 1
     ))),
     "in", valueOnly = TRUE
   )
@@ -42,11 +43,26 @@ booktabs_png <- function(data, output_file, title, subtitle, note, widths, align
   width <- content_w + 2 * left
   boundaries <- left + c(0, cumsum(widths))
 
+  output_dir <- dirname(output_file)
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  temp_output <- tempfile(
+    pattern = "booktabs_",
+    tmpdir = output_dir,
+    fileext = ".png"
+  )
+  device_open <- FALSE
+  on.exit({
+    if (device_open && grDevices::dev.cur() > 1L) {
+      try(grDevices::dev.off(), silent = TRUE)
+    }
+    if (file.exists(temp_output)) unlink(temp_output)
+  }, add = TRUE)
+
   ragg::agg_png(
-    output_file, width = width, height = height, units = "in",
+    temp_output, width = width, height = height, units = "in",
     res = resolution, background = "white"
   )
-  on.exit(grDevices::dev.off(), add = TRUE)
+  device_open <- TRUE
   grid::grid.newpage()
 
   draw_line <- function(y, colour = "#111111", size = 1) {
@@ -69,12 +85,16 @@ booktabs_png <- function(data, output_file, title, subtitle, note, widths, align
   grid::grid.text(
     title, x = grid::unit(left + 0.06, "in"), y = grid::unit(title_y, "in"),
     just = "left",
-    gp = grid::gpar(fontfamily = "Arial", fontface = "bold", fontsize = font_size + 3)
+    gp = grid::gpar(
+      fontfamily = font_family,
+      fontface = "bold",
+      fontsize = font_size + 3
+    )
   )
   grid::grid.text(
     subtitle, x = grid::unit(left + 0.06, "in"), y = grid::unit(subtitle_y, "in"),
     just = "left",
-    gp = grid::gpar(fontfamily = "Arial", fontsize = font_size + 1)
+    gp = grid::gpar(fontfamily = font_family, fontsize = font_size + 1)
   )
 
   for (column in seq_along(data)) {
@@ -83,7 +103,11 @@ booktabs_png <- function(data, output_file, title, subtitle, note, widths, align
       names(data)[column],
       x = grid::unit(cell_x(column, header_align), "in"),
       y = grid::unit(header_y, "in"), just = header_align,
-      gp = grid::gpar(fontfamily = "Arial", fontface = "bold", fontsize = font_size)
+      gp = grid::gpar(
+        fontfamily = font_family,
+        fontface = "bold",
+        fontsize = font_size
+      )
     )
   }
   draw_line(data_top + 0.08, colour = "#B0B0B0")
@@ -95,7 +119,7 @@ booktabs_png <- function(data, output_file, title, subtitle, note, widths, align
         as.character(data[row, column]),
         x = grid::unit(cell_x(column, align[column]), "in"),
         y = grid::unit(y, "in"), just = align[column],
-        gp = grid::gpar(fontfamily = "Arial", fontsize = font_size)
+        gp = grid::gpar(fontfamily = font_family, fontsize = font_size)
       )
     }
   }
@@ -108,11 +132,37 @@ booktabs_png <- function(data, output_file, title, subtitle, note, widths, align
     grid::grid.text(
       note_lines[line], x = grid::unit(left + 0.06, "in"),
       y = grid::unit(body_bottom - 0.16 * line, "in"), just = "left",
-      gp = grid::gpar(fontfamily = "Arial", fontsize = max(font_size - 1, 7))
+      gp = grid::gpar(
+        fontfamily = font_family,
+        fontsize = max(font_size - 1, 7)
+      )
     )
   }
   draw_line(0.12, size = 2)
-  invisible(output_file)
+
+  grDevices::dev.off()
+  device_open <- FALSE
+  output_actual <- output_file
+  copiado <- suppressWarnings(file.copy(
+    temp_output,
+    output_actual,
+    overwrite = TRUE
+  ))
+  if (!copiado) {
+    output_actual <- paste0(
+      tools::file_path_sans_ext(output_file),
+      "_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".png"
+    )
+    if (!file.copy(temp_output, output_actual, overwrite = FALSE)) {
+      stop("No se ha podido guardar la tabla en: ", dirname(output_file))
+    }
+    message(
+      "La tabla anterior estaba abierta. La nueva se guardo en: ",
+      output_actual
+    )
+  }
+  unlink(temp_output)
+  invisible(output_actual)
 }
 
 quality_metric_panel <- function(data, id, suffix, years, output_file,

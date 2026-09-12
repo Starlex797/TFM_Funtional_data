@@ -5,13 +5,14 @@
 # Diseño:
 #   - una covariable por fila y una estación por columna;
 #   - puntos diarios semitransparentes para covariables continuas;
-#   - boxplots para comparar días con lluvia frente a días sin lluvia;
+#   - precipitación continua con eje log1p para conservar los ceros;
 #   - escala X común dentro de cada fila y libre entre covariables;
-#   - tamaños de los grupos de lluvia anotados en los boxplots.
+#   - número de observaciones con precipitación cero y positiva anotado.
 #
 # Uso:
-#   Rscript <este_script> monthly
+#   source(<este_script>)            # daily by default
 #   Rscript <este_script> daily
+#   Rscript <este_script> monthly
 #
 # Salidas:
 #   outputs/figures/eda/no2_covariables_tipologia_diario/
@@ -28,13 +29,13 @@ suppressPackageStartupMessages({
 # 1. CONFIGURACIÓN
 # ==============================================================================
 
-# La escala se recibe como primer argumento; si se omite, se conserva la versión
-# mensual como comportamiento por defecto.
+# La escala se recibe como primer argumento; si se omite (por ejemplo, al usar
+# source() desde RStudio), se utiliza el maestro diario de 2019.
 argumentos <- commandArgs(trailingOnly = TRUE)
 escala_solicitada <- if (length(argumentos) >= 1L) {
   tolower(argumentos[1L])
 } else {
-  "monthly"
+  "daily"
 }
 alias_escala <- c(
   daily = "diaria", monthly = "mensual",
@@ -48,8 +49,8 @@ ESCALA <- unname(alias_escala[escala_solicitada])
 CONFIGURACIONES <- list(
   diaria = list(
     archivo = c(
-      "data", "processed", "Maestro", "diario",
-      "dataset_maestro_inla_2025_DIARIO.rds"
+      "data", "processed", "Maestro", "2019",
+      "dataset_maestro_inla_2019_DIARIO.rds"
     ),
     respuesta = "dato_diario",
     tiempo = "fecha",
@@ -57,9 +58,6 @@ CONFIGURACIONES <- list(
     unidad_observacion = "day",
     alpha = 0.30,
     tamano = 0.55,
-    lluvia_no = "No rain",
-    lluvia_si = "Rain",
-    x_lluvia = "Daily precipitation",
     unidad_precipitacion = "mm/day"
   ),
   mensual = list(
@@ -73,9 +71,6 @@ CONFIGURACIONES <- list(
     unidad_observacion = "month",
     alpha = 0.48,
     tamano = 0.85,
-    lluvia_no = "Dry month",
-    lluvia_si = "Month with rain",
-    x_lluvia = "Monthly precipitation",
     unidad_precipitacion = "mm/month"
   )
 )
@@ -83,7 +78,7 @@ CONFIGURACIONES <- list(
 CFG <- CONFIGURACIONES[[ESCALA]]
 
 # Regla de Tukey para detectar valores atípicos de tráfico dentro de cada
-# estación. Se usa 1,5 * IQR, la convención habitual para boxplots.
+# estación. Se usa 1,5 * IQR, una regla robusta para identificar extremos.
 FACTOR_IQR_TRAFICO <- 1.5
 
 # Estaciones y orden de las columnas. La etiqueta incluye la tipología para que
@@ -219,6 +214,9 @@ if (length(estaciones_ausentes) > 0L) {
   )
 }
 
+# Se conserva una copia con todas las estaciones para generar tambien una figura
+# global. La seleccion siguiente sigue alimentando el panel original por estacion.
+datos_todas_estaciones <- copy(datos)
 datos <- datos[estacion_id %chin% names(ESTACIONES)]
 
 # El tráfico tiene niveles estructuralmente distintos según la estación. Por
@@ -314,22 +312,18 @@ if (n_precipitacion_negativa > 0L) {
   ))
   largo <- largo[!(id == "precipitacion" & x < 0)]
 }
-largo[, grupo_lluvia := factor(
-  fifelse(id == "precipitacion" & x > 0, CFG$lluvia_si, CFG$lluvia_no),
-  levels = c(CFG$lluvia_no, CFG$lluvia_si)
-)]
-
 if (nrow(largo) == 0L) {
   stop("No complete and finite pairs remain for plotting.")
 }
 
-# Only the two rainfall-group sample sizes are annotated.
+# La precipitacion se mantiene continua. Se anotan los ceros para documentar
+# el fuerte desequilibrio sin convertir la variable en binaria.
 anotaciones_lluvia <- largo[id == "precipitacion", .(
-  n_no_llueve = sum(grupo_lluvia == CFG$lluvia_no),
-  n_llueve = sum(grupo_lluvia == CFG$lluvia_si)
+  n_cero = sum(x == 0),
+  n_positiva = sum(x > 0)
 ), by = .(id, estacion_panel)]
 anotaciones_lluvia[, etiqueta_n := sprintf(
-  "n(dry) = %d\nn(rain) = %d", n_no_llueve, n_llueve
+  "n(zero) = %d\nn(positive) = %d", n_cero, n_positiva
 )]
 
 anotaciones <- anotaciones_lluvia[, .(id, estacion_panel, etiqueta_n)]
@@ -346,35 +340,26 @@ crear_fila <- function(id_covariable, mostrar_cabeceras = FALSE) {
   # Al crear cada covariable como un ggplot independiente, facet_wrap() conserva
   # una única escala X para sus tres estaciones. Al apilar después los siete
   # ggplots, cada fila puede tener un rango X distinto.
-  if (id_covariable == "precipitacion") {
-    p <- ggplot(
-      datos_fila,
-      aes(x = grupo_lluvia, y = log_no2, fill = grupo_lluvia)
+  p <- ggplot(datos_fila, aes(x = x, y = log_no2)) +
+    geom_point(
+      color = "#2C5C85", size = CFG$tamano, alpha = CFG$alpha,
+      shape = 16, na.rm = TRUE
     ) +
-      geom_boxplot(
-        width = 0.56, linewidth = 0.45, alpha = 0.88,
-        outlier.alpha = 0.35, outlier.size = 0.75, na.rm = TRUE
-      ) +
-      scale_fill_manual(
-        values = setNames(
-          c("#D9D9D9", "#6BAED6"),
-          c(CFG$lluvia_no, CFG$lluvia_si)
-        ),
-        guide = "none"
-      ) +
-      scale_x_discrete(drop = FALSE) +
-      labs(x = CFG$x_lluvia)
+    labs(x = etiqueta_x)
+
+  if (id_covariable == "precipitacion") {
+    # log1p(0) = 0: los dias secos se conservan y las lluvias intensas dejan de
+    # comprimir visualmente las precipitaciones pequenas cerca del origen.
+    p <- p + scale_x_continuous(
+      transform = scales::transform_log1p(),
+      labels = scales::label_number(decimal.mark = ",", big.mark = "."),
+      expand = expansion(mult = c(0.015, 0.055))
+    )
   } else {
-    p <- ggplot(datos_fila, aes(x = x, y = log_no2)) +
-      geom_point(
-        color = "#2C5C85", size = CFG$tamano, alpha = CFG$alpha,
-        shape = 16, na.rm = TRUE
-      ) +
-      scale_x_continuous(
-        labels = scales::label_number(decimal.mark = ",", big.mark = "."),
-        expand = expansion(mult = c(0.035, 0.055))
-      ) +
-      labs(x = etiqueta_x)
+    p <- p + scale_x_continuous(
+      labels = scales::label_number(decimal.mark = ",", big.mark = "."),
+      expand = expansion(mult = c(0.035, 0.055))
+    )
   }
 
   p <- p +
@@ -465,9 +450,9 @@ figura <- wrap_plots(filas, ncol = 1, heights = rep(1, length(filas))) +
     ),
     caption = paste0(
       "Each point represents one ", CFG$unidad_observacion,
-      "; no smoothing curves are shown. Binary precipitation: the observation ",
-      "is classified as rainy when precipitation is > 0 ", CFG$unidad_precipitacion, ".\n",
-      "Boxplots show the median, interquartile range and 1.5\u00d7IQR whiskers."
+      "; no smoothing curves are shown. Precipitation is continuous and uses a ",
+      "log1p-transformed x-axis: zero rainfall remains at zero while positive ",
+      "values are expanded near the origin and compressed at the upper tail."
     ),
     theme = theme(
       plot.title = element_text(face = "bold", size = 13, color = "#1E2D3D"),
@@ -487,7 +472,7 @@ figura <- wrap_plots(filas, ncol = 1, heights = rep(1, length(filas))) +
 archivo_png <- file.path(
   DIR_SALIDA,
   sprintf(
-    "panel_%s_log_no2_covariates_station_type_%s_no_smoother_binary_rainfall.png",
+    "panel_%s_log_no2_covariates_station_type_%s_scatter_log1p_rainfall.png",
     ESCALA, periodo_archivo
   )
 )
@@ -511,5 +496,187 @@ cat("  PNG: ", archivo_png, "\n", sep = "")
 cat("  PDF: ", archivo_pdf, "\n", sep = "")
 cat("  Traffic outliers excluded (1.5*IQR rule within station): ",
   n_out_trafico, "\n",
+  sep = ""
+)
+
+# ==============================================================================
+# 6. RELACION GLOBAL: TODAS LAS ESTACIONES AGRUPADAS
+# ==============================================================================
+
+# Se aplica a todas las estaciones el mismo criterio usado en la figura anterior.
+# Los limites de trafico se calculan dentro de cada estacion antes de agruparlas.
+limites_trafico_general <- datos_todas_estaciones[is.finite(intensidad_raw),
+  {
+    q1 <- quantile(intensidad_raw, 0.25, na.rm = TRUE, names = FALSE)
+    q3 <- quantile(intensidad_raw, 0.75, na.rm = TRUE, names = FALSE)
+    iqr <- q3 - q1
+    .(
+      limite_inferior = q1 - FACTOR_IQR_TRAFICO * iqr,
+      limite_superior = q3 + FACTOR_IQR_TRAFICO * iqr
+    )
+  },
+  by = estacion_id
+]
+
+datos_todas_estaciones[
+  limites_trafico_general,
+  on = "estacion_id",
+  `:=`(
+    limite_inferior = i.limite_inferior,
+    limite_superior = i.limite_superior
+  )
+]
+datos_todas_estaciones[, outlier_trafico :=
+  is.finite(intensidad_raw) &
+    (intensidad_raw < limite_inferior | intensidad_raw > limite_superior)]
+n_out_trafico_general <- datos_todas_estaciones[outlier_trafico == TRUE, .N]
+datos_todas_estaciones[outlier_trafico == TRUE, intensidad_raw := NA_real_]
+datos_todas_estaciones[is.finite(no2) & no2 > 0, log_no2 := log(no2)]
+datos_todas_estaciones[
+  ,
+  c("limite_inferior", "limite_superior", "outlier_trafico") := NULL
+]
+
+largo_general <- melt(
+  datos_todas_estaciones[,
+    c("fecha", "log_no2", COVARIABLES$columna),
+    with = FALSE
+  ],
+  id.vars = c("fecha", "log_no2"),
+  measure.vars = COVARIABLES$columna,
+  variable.name = "columna_covariable",
+  value.name = "x",
+  variable.factor = FALSE,
+  na.rm = FALSE
+)
+largo_general <- largo_general[is.finite(x) & is.finite(log_no2)]
+largo_general <- merge(
+  largo_general,
+  COVARIABLES,
+  by.x = "columna_covariable",
+  by.y = "columna",
+  all.x = TRUE,
+  sort = FALSE
+)
+largo_general <- largo_general[!(id == "precipitacion" & x < 0)]
+largo_general[, id := factor(id, levels = COVARIABLES$id)]
+
+anotacion_lluvia_general <- largo_general[id == "precipitacion", .(
+  etiqueta_n = sprintf(
+    "n(zero) = %d\nn(positive) = %d",
+    sum(x == 0), sum(x > 0)
+  )
+)]
+
+crear_panel_general <- function(id_covariable) {
+  datos_panel <- largo_general[id == id_covariable]
+  etiqueta_x <- COVARIABLES[id == id_covariable, etiqueta]
+
+  p <- ggplot(datos_panel, aes(x = x, y = log_no2)) +
+    geom_point(
+      color = "#2C5C85", size = 0.45, alpha = 0.18,
+      shape = 16, na.rm = TRUE
+    ) +
+    labs(x = etiqueta_x, y = expression(log(NO[2])))
+
+  if (id_covariable == "precipitacion") {
+    p <- p +
+      scale_x_continuous(
+        transform = scales::transform_log1p(),
+        labels = scales::label_number(decimal.mark = ",", big.mark = "."),
+        expand = expansion(mult = c(0.015, 0.055))
+      ) +
+      geom_label(
+        data = anotacion_lluvia_general,
+        aes(x = Inf, y = Inf, label = etiqueta_n),
+        inherit.aes = FALSE,
+        hjust = 1.08, vjust = 1.10,
+        size = 2.4, lineheight = 0.90,
+        label.padding = unit(0.10, "lines"),
+        label.r = unit(0.08, "lines"),
+        linewidth = 0,
+        fill = "white", color = "#333333"
+      )
+  } else {
+    p <- p + scale_x_continuous(
+      labels = scales::label_number(decimal.mark = ",", big.mark = "."),
+      expand = expansion(mult = c(0.035, 0.055))
+    )
+  }
+
+  p +
+    scale_y_continuous(
+      labels = scales::label_number(accuracy = 0.5, decimal.mark = ","),
+      expand = expansion(mult = c(0.035, 0.13))
+    ) +
+    theme_minimal(base_size = 9) +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "grey88", linewidth = 0.25),
+      panel.border = element_rect(color = "grey72", fill = NA, linewidth = 0.35),
+      axis.title = element_text(size = 8.2),
+      axis.text = element_text(size = 7.2, color = "grey25"),
+      axis.ticks = element_line(color = "grey55", linewidth = 0.25),
+      axis.ticks.length = unit(1.2, "pt"),
+      plot.margin = margin(t = 2, r = 5, b = 2, l = 4)
+    )
+}
+
+paneles_generales <- lapply(COVARIABLES$id, crear_panel_general)
+
+figura_general <- wrap_plots(
+  paneles_generales,
+  ncol = 1,
+  heights = rep(1, length(paneles_generales))
+) +
+  plot_annotation(
+    title = paste0(
+      if (ESCALA == "mensual") "Monthly" else "Daily",
+      " relationship between NO\u2082 and its covariates in Madrid"
+    ),
+    subtitle = paste0(
+      "All monitoring stations pooled  \u00b7  Period: ", periodo,
+      "  \u00b7  Source: Madrid City Council"
+    ),
+    caption = paste0(
+      "Each point represents one station-", CFG$unidad_observacion,
+      "; stations are pooled and are not identified.\nNo smoothing curves are ",
+      "shown. Precipitation uses a log1p-transformed x-axis."
+    ),
+    theme = theme(
+      plot.title = element_text(face = "bold", size = 13, color = "#1E2D3D"),
+      plot.subtitle = element_text(size = 8.4, color = "grey35", margin = margin(b = 5)),
+      plot.caption = element_text(
+        size = 7.4, color = "grey35", hjust = 0,
+        margin = margin(t = 5)
+      ),
+      plot.margin = margin(t = 8, r = 8, b = 7, l = 6)
+    )
+  )
+
+archivo_png_general <- file.path(
+  DIR_SALIDA,
+  sprintf(
+    "panel_%s_log_no2_covariates_all_stations_pooled_%s_scatter.png",
+    ESCALA, periodo_archivo
+  )
+)
+archivo_pdf_general <- sub("\\.png$", ".pdf", archivo_png_general)
+
+ggsave(
+  filename = archivo_png_general, plot = figura_general,
+  width = 180, height = 297, units = "mm", dpi = 320, bg = "white"
+)
+ggsave(
+  filename = archivo_pdf_general, plot = figura_general, device = dispositivo_pdf,
+  width = 180, height = 297, units = "mm", bg = "white"
+)
+
+cat("\nPooled figure generated successfully:\n")
+cat("  PNG: ", archivo_png_general, "\n", sep = "")
+cat("  PDF: ", archivo_pdf_general, "\n", sep = "")
+cat(
+  "  Traffic outliers excluded across all stations (within-station rule): ",
+  n_out_trafico_general, "\n",
   sep = ""
 )
