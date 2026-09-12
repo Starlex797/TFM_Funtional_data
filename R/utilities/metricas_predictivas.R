@@ -15,32 +15,10 @@
 # termino el intervalo queda demasiado estrecho y COV95 sale muy por debajo de
 # 95 aunque el modelo este bien especificado (ver 01_modelo_2019_2021.R).
 #
-# inla.group.cv() (validacion LOSO) ya devuelve una sd predictiva completa, asi
-# que ahi varianza_residual debe quedarse en 0 (el valor por defecto).
+# La funcion que extrae la varianza residual de INLA se encuentra en
+# R/modeling/inla_modeling.R. Este archivo conserva solamente metricas que se
+# pueden aplicar a cualquier conjunto de predicciones gaussianas.
 # ==============================================================================
-
-#' Varianza residual gaussiana de un modelo INLA.
-#'
-#' Media posterior de 1 / precision, calculada sobre la marginal completa con
-#' inla.emarginal(). Es mas correcto que 1 / mean(precision), que ignora la
-#' asimetria de la posterior de la precision.
-#'
-#' @param modelo objeto devuelto por inla() con family = "gaussian".
-#' @return numero: varianza residual, en la escala de la respuesta modelada.
-varianza_residual_gaussiana <- function(modelo) {
-    nombre <- grep(
-        "^Precision for the Gaussian observations",
-        names(modelo$marginals.hyperpar),
-        value = TRUE
-    )
-    if (length(nombre) != 1L) {
-        stop("No se ha podido identificar la precision residual gaussiana.")
-    }
-    inla.emarginal(
-        function(precision) 1 / precision,
-        modelo$marginals.hyperpar[[nombre]]
-    )
-}
 
 #' RMSE y cobertura del 95% de un conjunto de predicciones gaussianas.
 #'
@@ -51,8 +29,6 @@ varianza_residual_gaussiana <- function(modelo) {
 #'     incertidumbre de la media ajustada. Pasa varianza_residual (ver
 #'     varianza_residual_gaussiana()) para que COV95 sea comparable a una
 #'     cobertura predictiva real.
-#'   - Con inla.group.cv()$sd (validacion LOSO): ya es predictiva completa,
-#'     deja varianza_residual = 0.
 #' @param varianza_residual varianza residual gaussiana que se suma a
 #'   sd_pred^2 antes de construir el intervalo. Por defecto 0.
 #' @param nivel nivel de confianza del intervalo. Por defecto 0.95.

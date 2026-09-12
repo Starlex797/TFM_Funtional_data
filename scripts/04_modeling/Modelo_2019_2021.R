@@ -7,20 +7,21 @@
 # Comparar dos procedimientos sobre el mismo conjunto de datos:
 #
 #   M1. Modelo espacial base
-#       Incluye efectos fijos de temperatura, velocidad del viento, lluvia y
-#       presion barometrica, ademas de un campo espacial Matérn para el NO2.
+#       Incluye temperatura, velocidad del viento, lluvia, presion,
+#       intensidad y tipologia, ademas de un campo espacial para el NO2.
 #
 #   M2. Modelo con coeficiente espacialmente variable
 #       Conserva exactamente la estructura de M1 y añade un segundo campo SPDE
-#       que permite que el efecto de la temperatura cambie espacialmente.
+#       que permite que el efecto de la velocidad del viento cambie
+#       espacialmente.
 #
 # La ecuacion conceptual del segundo modelo es:
 #
 #   y(s,t) = beta_0 + beta' x(s,t) + w_NO2(s)
-#            + Temperatura(s,t) * w_Temperatura(s) + error(s,t)
+#            + Velocidad_Viento(s,t) * w_Viento(s) + error(s,t)
 #
-# De este modo, beta_Temperatura representa el efecto medio de la temperatura
-# y w_Temperatura(s) representa la desviacion espacial respecto a ese efecto.
+# De este modo, la RW2 de velocidad representa su efecto medio no lineal y el
+# campo adicional representa su desviacion espacial.
 # Todos los demas elementos se mantienen iguales para que la comparacion sea
 # atribuible al campo adicional.
 #
@@ -28,6 +29,9 @@
 # -------------------
 #   1. tabla_comparacion_modelos_2019_2021.csv
 #   2. tabla_coeficientes_modelos_2019_2021.csv
+#   3. tabla_holdout_espacial_2019_2021.csv
+#   4. tabla_holdout_por_estacion_2019_2021.csv
+#   5. predicciones_holdout_2019_2021.csv
 #
 # Nota: RMSE_ajuste se calcula con los mismos datos empleados para ajustar el
 # modelo. Sirve como diagnostico descriptivo, no sustituye una
@@ -46,7 +50,7 @@ library(Matrix)
 
 
 source(here("R", "modeling", "spde_config.R"))
-
+source(here("R", "modeling", "inla_modeling.R"))
 
 
 # Periodo y escala de los datos.
@@ -75,12 +79,38 @@ COVARIABLES <- c(
 # Para estudiar otra covariable basta con cambiar este unico nombre.
 COVARIABLE_CAMPO <- "Velocidad_Viento"
 
+# Numero de grupos de los efectos no lineales RW2.
+N_GRUPOS_RW2 <- c(
+    Temperatura = 40L,
+    Velocidad_Viento = 40L
+)
+METODO_GRUPOS_RW2 <- "quantile"
+
 # Malla y opciones comunes de INLA.
-NOMBRE_MALLA <- "media"
+NOMBRE_MALLA <- "fina"
 RUTA_MALLA <- here(
     "data", "processed", "Malla", "NO2",
     sprintf("malla_spde_madrid_%s.rds", NOMBRE_MALLA)
 )
+
+# PC priors introducidos manualmente para este analisis:
+#   prior.range = c(r0, p) -> P(rango < r0) = p
+#   prior.sigma = c(s0, p) -> P(sigma > s0) = p
+# Cambia aqui los valores si quieres realizar un analisis de sensibilidad.
+prior_spde <- list(
+    prior.range = c(9.3, 0.5),
+    prior.sigma = c(0.6, 0.2)
+)
+
+# Validacion espacial comun para M1 y M2. Las respuestas de estas estaciones
+# se sustituyen por NA durante el segundo ajuste y se usan solo para evaluar.
+CALCULAR_HOLDOUT <- TRUE
+ESTACIONES_HOLDOUT <- c(
+    "Plaza Castilla",
+    "Casa de Campo",
+    "Ensanche Vallecas"
+)
+
 FAMILIA <- "gaussian"
 NUM_THREADS <- 5L
 ESTRATEGIA_INTEGRACION <- "eb"
@@ -116,7 +146,8 @@ if (!COVARIABLE_CAMPO %in% COVARIABLES) {
 datos <- as.data.table(readRDS(RUTA_DATOS))
 
 columnas_necesarias <- c(
-    "ESTACION", "FECHA", "X_km", "Y_km", RESPUESTA, COVARIABLES
+    "ESTACION", "NOM_TIPO", "FECHA", "X_km", "Y_km",
+    RESPUESTA, COVARIABLES
 )
 columnas_ausentes <- setdiff(columnas_necesarias, names(datos))
 if (length(columnas_ausentes) > 0L) {
@@ -143,6 +174,28 @@ if (!all(datos$Llueve %in% c(0, 1))) {
 }
 
 datos[, y := get(RESPUESTA)]
+
+# Suburbana es la referencia. Se utilizan dos indicadores explicitos porque
+# las formulas llevan -1 + Intercept; incluir el factor completo junto con el
+# intercepto manual generaria una columna redundante.
+datos[, NOM_TIPO := relevel(factor(NOM_TIPO), ref = "Suburbana")]
+datos[, Tipo_Urbana_fondo := as.integer(NOM_TIPO == "Urbana fondo")]
+datos[, Tipo_Urbana_trafico := as.integer(
+    NOM_TIPO != "Suburbana" & NOM_TIPO != "Urbana fondo"
+)]
+
+# Las formulas utilizan estos dos indices discretos. Deben crearse antes del
+# stack y viajar dentro de efectos_fijos para que inla() pueda encontrarlos.
+datos[, Temperatura_rw2 := inla.group(
+    Temperatura,
+    n = N_GRUPOS_RW2[["Temperatura"]],
+    method = METODO_GRUPOS_RW2
+)]
+datos[, Velocidad_Viento_rw2 := inla.group(
+    Velocidad_Viento,
+    n = N_GRUPOS_RW2[["Velocidad_Viento"]],
+    method = METODO_GRUPOS_RW2
+)]
 setorder(datos, FECHA, ESTACION)
 
 cat("\n", strrep("=", 72), "\n", sep = "")
@@ -166,7 +219,12 @@ cat("Filas omitidas por datos incompletos: ", n_eliminadas, "\n", sep = "")
 malla <- readRDS(RUTA_MALLA)
 
 # Campo espacial comun que representa la variacion espacial residual del NO2.
-spde_no2 <- crear_spde(malla, escala = ESCALA)
+spde_no2 <- crear_spde(
+    malla,
+    escala = ESCALA,
+    prior.range = prior_spde$prior.range,
+    prior.sigma = prior_spde$prior.sigma
+)
 indice_no2 <- inla.spde.make.index(
     name = "campo_no2",
     n.spde = spde_no2$n.spde
@@ -176,7 +234,7 @@ indice_no2 <- inla.spde.make.index(
 # covariable elegida. Utiliza los mismos PC priors que el campo del NO2.
 # constr = TRUE centra el campo y separa su desviacion espacial del efecto fijo
 # medio de la covariable.
-prior_spde <- PRIORS_SPDE[[ESCALA]]
+
 spde_covariable <- inla.spde2.pcmatern(
     mesh = malla,
     alpha = 2,
@@ -208,9 +266,13 @@ stopifnot(
 # Efectos fijos compartidos por ambos modelos.
 efectos_fijos <- data.frame(
     Intercept = rep(1, nrow(datos)),
+    Temperatura_rw2 = datos$Temperatura_rw2,
+    Velocidad_Viento_rw2 = datos$Velocidad_Viento_rw2,
     Llueve = datos$Llueve,
     Presion_Barometrica = datos$Presion_Barometrica,
-    intendidad = datos$intensidad
+    intensidad = datos$intensidad,
+    Tipo_Urbana_fondo = datos$Tipo_Urbana_fondo,
+    Tipo_Urbana_trafico = datos$Tipo_Urbana_trafico
 )
 
 
@@ -218,16 +280,21 @@ efectos_fijos <- data.frame(
 # BLOQUE 4. FORMULACION Y AJUSTE DE LOS MODELOS
 # ==============================================================================
 
-# M1: campo espacial del NO2 y cuatro covariables como efectos fijos.
+# M1: misma especificacion seleccionada en M5 y campo espacial del NO2.
 formula_M1 <- y_response ~ -1 + Intercept +
-    Temperatura + Velocidad_Viento + Llueve + Presion_Barometrica +
+    f(Temperatura_rw2, model = "rw2", scale.model = TRUE) +
+    f(Velocidad_Viento_rw2, model = "rw2", scale.model = TRUE) +
+    Llueve + Presion_Barometrica + intensidad +
+    Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_no2, model = spde_no2)
 
-# M2: M1 mas un campo que permite que el coeficiente de la temperatura cambie
+# M2: M1 mas un campo que permite que el coeficiente del viento cambie
 # entre localizaciones. A_covariable introduce el producto
-# Temperatura(s,t) * w_Temperatura(s) en el predictor.
+# Velocidad_Viento(s,t) * w_Viento(s) en el predictor.
 formula_M2 <- y_response ~ -1 + Intercept +
-    Temperatura + Velocidad_Viento + Llueve + Presion_Barometrica +
+    f(Temperatura_rw2, model = "rw2", scale.model = TRUE) +
+    Llueve + Presion_Barometrica + intensidad +
+    Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_no2, model = spde_no2) +
     f(campo_covariable, model = spde_covariable)
 
@@ -251,132 +318,185 @@ cat("MODELOS COMPARADOS\n")
 cat(strrep("=", 72), "\n", sep = "")
 print(catalogo_modelos[, .(Modelo, Procedimiento)], nrows = Inf)
 
-crear_stack <- function(incluir_campo_covariable = FALSE) {
-    if (incluir_campo_covariable) {
-        inla.stack(
-            data = list(y_response = datos$y),
-            A = list(A_no2, A_covariable, 1),
-            effects = list(
-                indice_no2,
-                indice_covariable,
-                efectos_fijos
+stack_M1 <- crear_stack_inla(
+    respuesta = datos$y,
+    A = list(A_no2, 1),
+    effects = list(indice_no2, efectos_fijos),
+    tag = "estimacion"
+)
+stack_M2 <- crear_stack_inla(
+    respuesta = datos$y,
+    A = list(A_no2, A_covariable, 1),
+    effects = list(indice_no2, indice_covariable, efectos_fijos),
+    tag = "estimacion"
+)
+
+ajuste_M1 <- ajustar_modelo_cronometrado_inla(
+    formula_modelo = formula_M1,
+    stack = stack_M1,
+    id_modelo = "M1",
+    familia = FAMILIA,
+    verbose = VERBOSE_INLA,
+    num_threads = NUM_THREADS,
+    calcular_cpo = TRUE,
+    int_strategy = ESTRATEGIA_INTEGRACION
+)
+ajuste_M2 <- ajustar_modelo_cronometrado_inla(
+    formula_modelo = formula_M2,
+    stack = stack_M2,
+    id_modelo = "M2",
+    familia = FAMILIA,
+    verbose = VERBOSE_INLA,
+    num_threads = NUM_THREADS,
+    calcular_cpo = TRUE,
+    int_strategy = ESTRATEGIA_INTEGRACION
+)
+
+
+# ==============================================================================
+# BLOQUE 5. HOLD-OUT ESPACIAL COMUN PARA M1 Y M2
+# ==============================================================================
+
+tabla_holdout <- NULL
+tabla_holdout_estacion <- NULL
+predicciones_holdout <- NULL
+ajustes_holdout <- NULL
+
+if (CALCULAR_HOLDOUT) {
+    estaciones_ausentes <- setdiff(
+        ESTACIONES_HOLDOUT,
+        unique(datos$ESTACION)
+    )
+    if (length(estaciones_ausentes) > 0L) {
+        stop(
+            "No existen estas estaciones del hold-out: ",
+            paste(estaciones_ausentes, collapse = ", ")
+        )
+    }
+
+    es_holdout <- datos$ESTACION %in% ESTACIONES_HOLDOUT
+    if (!any(es_holdout) || !any(!es_holdout)) {
+        stop(
+            "El hold-out debe contener observaciones de prueba y de ",
+            "entrenamiento."
+        )
+    }
+
+    y_holdout <- copy(datos$y)
+    y_holdout[es_holdout] <- NA_real_
+
+    stack_holdout_M1 <- crear_stack_inla(
+        respuesta = y_holdout,
+        A = list(A_no2, 1),
+        effects = list(indice_no2, efectos_fijos),
+        tag = "holdout"
+    )
+    stack_holdout_M2 <- crear_stack_inla(
+        respuesta = y_holdout,
+        A = list(A_no2, A_covariable, 1),
+        effects = list(indice_no2, indice_covariable, efectos_fijos),
+        tag = "holdout"
+    )
+
+    cat("\n", strrep("=", 72), "\n", sep = "")
+    cat("HOLD-OUT ESPACIAL\n")
+    cat(strrep("=", 72), "\n", sep = "")
+    print(unique(datos[
+        es_holdout,
+        .(ESTACION, NOM_TIPO = as.character(NOM_TIPO))
+    ])[order(ESTACION)])
+    cat("Entrenamiento: ", sum(!es_holdout), " observaciones\n", sep = "")
+    cat("Prueba:        ", sum(es_holdout), " observaciones\n", sep = "")
+
+    ajustes_holdout <- list(
+        M1 = ajustar_holdout_espacial_inla(
+            formula_modelo = formula_M1,
+            id_modelo = "M1",
+            descripcion = "Campo espacial del NO2",
+            stack = stack_holdout_M1,
+            indices_observaciones = indices_stack_inla(
+                stack_holdout_M1,
+                "holdout"
             ),
-            tag = "estimacion"
-        )
-    } else {
-        inla.stack(
-            data = list(y_response = datos$y),
-            A = list(A_no2, 1),
-            effects = list(indice_no2, efectos_fijos),
-            tag = "estimacion"
-        )
-    }
-}
-
-ajustar_modelo <- function(formula, stack, id_modelo) {
-    cat("\nAjustando ", id_modelo, "...\n", sep = "")
-    inicio <- Sys.time()
-
-    modelo <- inla(
-        formula = formula,
-        data = inla.stack.data(stack),
-        family = FAMILIA,
-        num.threads = NUM_THREADS,
-        verbose = VERBOSE_INLA,
-        control.predictor = list(
-            A = inla.stack.A(stack),
-            compute = TRUE
+            datos = datos,
+            es_holdout = es_holdout,
+            familia = FAMILIA,
+            verbose = VERBOSE_INLA,
+            num_threads = NUM_THREADS
         ),
-        control.inla = list(
-            strategy = "gaussian",
-            int.strategy = ESTRATEGIA_INTEGRACION
-        ),
-        control.compute = list(
-            dic = TRUE,
-            waic = TRUE,
-            cpo = TRUE,
-            openmp.strategy = "huge"
+        M2 = ajustar_holdout_espacial_inla(
+            formula_modelo = formula_M2,
+            id_modelo = "M2",
+            descripcion = paste0(
+                "Campo espacial del NO2 + coeficiente espacial de ",
+                COVARIABLE_CAMPO
+            ),
+            stack = stack_holdout_M2,
+            indices_observaciones = indices_stack_inla(
+                stack_holdout_M2,
+                "holdout"
+            ),
+            datos = datos,
+            es_holdout = es_holdout,
+            familia = FAMILIA,
+            verbose = VERBOSE_INLA,
+            num_threads = NUM_THREADS
         )
     )
 
-    minutos <- as.numeric(difftime(Sys.time(), inicio, units = "mins"))
-    cat(sprintf("%s completado en %.2f minutos.\n", id_modelo, minutos))
-
-    list(modelo = modelo, stack = stack, minutos = minutos)
+    tabla_holdout <- rbindlist(lapply(ajustes_holdout, `[[`, "global"))
+    tabla_holdout_estacion <- rbindlist(lapply(
+        ajustes_holdout,
+        `[[`,
+        "por_estacion"
+    ))
+    predicciones_holdout <- rbindlist(lapply(
+        ajustes_holdout,
+        `[[`,
+        "predicciones"
+    ))
+    setorder(tabla_holdout, Modelo)
+    setorder(tabla_holdout_estacion, Modelo, ESTACION)
+    setorder(predicciones_holdout, Modelo, ESTACION, FECHA)
 }
-
-stack_M1 <- crear_stack(incluir_campo_covariable = FALSE)
-stack_M2 <- crear_stack(incluir_campo_covariable = TRUE)
-
-ajuste_M1 <- ajustar_modelo(formula_M1, stack_M1, "M1")
-ajuste_M2 <- ajustar_modelo(formula_M2, stack_M2, "M2")
 
 
 # ==============================================================================
-# BLOQUE 5. COMPARACION DE LOS DOS PROCEDIMIENTOS
+# BLOQUE 6. COMPARACION DE LOS DOS PROCEDIMIENTOS
 # ==============================================================================
-
-obtener_varianza_residual <- function(modelo) {
-    nombre_precision <- grep(
-        "^Precision for the Gaussian observations",
-        names(modelo$marginals.hyperpar),
-        value = TRUE
-    )
-    if (length(nombre_precision) != 1L) {
-        stop("No se ha podido identificar la precision residual gaussiana.")
-    }
-
-    # E(1 / precision) es la varianza residual posterior media.
-    inla.emarginal(
-        function(precision) 1 / precision,
-        modelo$marginals.hyperpar[[nombre_precision]]
-    )
-}
-
-resumir_modelo <- function(ajuste, id_modelo, procedimiento) {
-    modelo <- ajuste$modelo
-    indices <- inla.stack.index(ajuste$stack, tag = "estimacion")$data
-    resumen_ajuste <- modelo$summary.fitted.values[indices, , drop = FALSE]
-
-    media <- resumen_ajuste[, "mean"]
-    sd_media <- resumen_ajuste[, "sd"]
-    error <- media - datos$y
-
-    # Para la cobertura de observaciones se suma la varianza residual. El sd de
-    # fitted.values por si solo describe la incertidumbre de la media, no toda
-    # la incertidumbre predictiva de una observacion nueva.
-    varianza_residual <- obtener_varianza_residual(modelo)
-    sd_predictiva <- sqrt(sd_media^2 + varianza_residual)
-    dentro_95 <- datos$y >= media - 1.96 * sd_predictiva &
-        datos$y <= media + 1.96 * sd_predictiva
-
-    data.table(
-        Modelo = id_modelo,
-        Procedimiento = procedimiento,
-        WAIC = modelo$waic$waic,
-        WAIC_p_eff = modelo$waic$p.eff,
-        DIC = modelo$dic$dic,
-        DIC_p_eff = modelo$dic$p.eff,
-        RMSE_ajuste = sqrt(mean(error^2, na.rm = TRUE)),
-        COV95_predictiva_ajuste = 100 * mean(dentro_95, na.rm = TRUE)
-    )
-}
 
 tabla_comparacion <- rbindlist(list(
-    resumir_modelo(
-        ajuste_M1,
-        "M1",
-        "Campo espacial del NO2"
+    resumir_ajuste_inla(
+        ajuste = ajuste_M1,
+        id_modelo = "M1",
+        procedimiento = "Campo espacial del NO2",
+        y_observada = datos$y
     ),
-    resumir_modelo(
-        ajuste_M2,
-        "M2",
-        paste0(
+    resumir_ajuste_inla(
+        ajuste = ajuste_M2,
+        id_modelo = "M2",
+        procedimiento = paste0(
             "Campo espacial del NO2 + coeficiente espacial de ",
             COVARIABLE_CAMPO
-        )
+        ),
+        y_observada = datos$y
     )
 ))
+
+if (CALCULAR_HOLDOUT) {
+    tabla_comparacion[
+        tabla_holdout,
+        on = .(Modelo),
+        `:=`(
+            RMSE_HOLDOUT = i.RMSE_HOLDOUT,
+            MAE_HOLDOUT = i.MAE_HOLDOUT,
+            Sesgo_HOLDOUT = i.Sesgo_HOLDOUT,
+            COV95_HOLDOUT = i.COV95_HOLDOUT,
+            Anchura_media_IC95_HOLDOUT = i.Anchura_media_IC95_HOLDOUT,
+            Observaciones_HOLDOUT = i.Observaciones_HOLDOUT
+        )
+    ]
+}
 
 # Los deltas se calculan respecto a M1. Un valor negativo indica que M2 reduce
 # la metrica correspondiente. Para WAIC, DIC y RMSE, menor es mejor.
@@ -387,47 +507,34 @@ tabla_comparacion[, `:=`(
     Delta_RMSE_vs_M1 = RMSE_ajuste - referencia_M1$RMSE_ajuste,
     Orden_WAIC = frank(WAIC, ties.method = "min")
 )]
+if (CALCULAR_HOLDOUT) {
+    tabla_comparacion[, `:=`(
+        Delta_RMSE_HOLDOUT_vs_M1 =
+            RMSE_HOLDOUT - referencia_M1$RMSE_HOLDOUT,
+        Delta_Anchura_HOLDOUT_vs_M1 =
+            Anchura_media_IC95_HOLDOUT -
+                referencia_M1$Anchura_media_IC95_HOLDOUT
+    )]
+}
 
 # Tabla conjunta de coeficientes fijos. Las covariables continuas ya proceden
 # estandarizadas del maestro; el coeficiente de Llueve compara dias con lluvia
 # frente a dias sin lluvia. Un efecto es significativo al 95 % cuando su
 # intervalo posterior no contiene cero.
-extraer_coeficientes <- function(modelo, id_modelo) {
-    resumen <- as.data.table(
-        modelo$summary.fixed,
-        keep.rownames = "Variable"
-    )
-    resumen[Variable != "Intercept", .(
-        Modelo = id_modelo,
-        Variable,
-        Coeficiente = mean,
-        IC95 = sprintf(
-            "[%.4f, %.4f]",
-            `0.025quant`,
-            `0.975quant`
-        ),
-        Significativa_95 = fifelse(
-            `0.025quant` > 0 | `0.975quant` < 0,
-            "Si",
-            "No"
-        )
-    )]
-}
-
 tabla_coeficientes <- rbindlist(list(
-    extraer_coeficientes(
-        ajuste_M1$modelo,
-        "M1"
+    extraer_coeficientes_fijos_inla(
+        modelo = ajuste_M1$modelo,
+        id_modelo = "M1"
     ),
-    extraer_coeficientes(
-        ajuste_M2$modelo,
-        "M2"
+    extraer_coeficientes_fijos_inla(
+        modelo = ajuste_M2$modelo,
+        id_modelo = "M2"
     )
 ))
 
 
 # ==============================================================================
-# BLOQUE 6. EXPORTACION Y PRESENTACION DE RESULTADOS
+# BLOQUE 7. EXPORTACION Y PRESENTACION DE RESULTADOS
 # ==============================================================================
 
 fwrite(
@@ -438,6 +545,20 @@ fwrite(
     tabla_coeficientes,
     file.path(DIR_SALIDA, "tabla_coeficientes_modelos_2019_2021.csv")
 )
+if (CALCULAR_HOLDOUT) {
+    fwrite(
+        tabla_holdout,
+        file.path(DIR_SALIDA, "tabla_holdout_espacial_2019_2021.csv")
+    )
+    fwrite(
+        tabla_holdout_estacion,
+        file.path(DIR_SALIDA, "tabla_holdout_por_estacion_2019_2021.csv")
+    )
+    fwrite(
+        predicciones_holdout,
+        file.path(DIR_SALIDA, "predicciones_holdout_2019_2021.csv")
+    )
+}
 if (GUARDAR_MODELOS) {
     saveRDS(
         ajuste_M1$modelo,
@@ -445,7 +566,7 @@ if (GUARDAR_MODELOS) {
     )
     saveRDS(
         ajuste_M2$modelo,
-        file.path(DIR_MODELOS, "modelo_M2_campo_temperatura.rds")
+        file.path(DIR_MODELOS, "modelo_M2_campo_velocidad_viento.rds")
     )
 }
 
@@ -457,6 +578,20 @@ cat("\nInterpretacion de los deltas:\n")
 cat("  Delta < 0: M2 mejora la metrica respecto a M1.\n")
 cat("  Delta > 0: M2 empeora la metrica respecto a M1.\n")
 cat("  COV95 debe aproximarse a 95 %, pero aqui sigue siendo una medida de ajuste.\n")
+
+if (CALCULAR_HOLDOUT) {
+    cat("\n", strrep("=", 72), "\n", sep = "")
+    cat("RESULTADOS DEL HOLD-OUT ESPACIAL\n")
+    cat(strrep("=", 72), "\n", sep = "")
+    print(tabla_holdout, nrows = Inf)
+    cat("\nResultados por estacion:\n")
+    print(tabla_holdout_estacion, nrows = Inf)
+    cat(
+        "\nEl COV95 del hold-out debe interpretarse junto con RMSE, sesgo ",
+        "y anchura.\n",
+        sep = ""
+    )
+}
 
 cat("\n", strrep("=", 72), "\n", sep = "")
 cat("TABLA DE COEFICIENTES FIJOS\n")
@@ -471,6 +606,13 @@ cat(
 if (interactive()) {
     View(tabla_comparacion, title = "Comparacion de modelos 2019-2021")
     View(tabla_coeficientes, title = "Coeficientes de los modelos 2019-2021")
+    if (CALCULAR_HOLDOUT) {
+        View(tabla_holdout, title = "Hold-out espacial M1 y M2")
+        View(
+            tabla_holdout_estacion,
+            title = "Hold-out por modelo y estacion"
+        )
+    }
 }
 
 cat("\nResultados guardados en: ", DIR_SALIDA, "\n", sep = "")

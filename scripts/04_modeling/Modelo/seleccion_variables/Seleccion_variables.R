@@ -2,7 +2,7 @@
 # SELECCION DE VARIABLES PARA EL MODELO INLA-SPDE (2019-2021)
 # ==============================================================================
 # Objetivo:
-#   Comparar las cuatro formulas M0-M3 escritas manualmente en el bloque 6.
+#   Comparar las ocho formulas M0-M7 escritas manualmente en el bloque 6.
 #   Todos los modelos usan los mismos datos, la misma malla y el mismo campo
 #   espacial; solamente cambia la combinacion de covariables.
 #
@@ -30,6 +30,7 @@ library(here)
 
 source(here("R", "modeling", "spde_config.R"))
 source(here("R", "utilities", "metricas_predictivas.R"))
+source(here("R", "modeling", "inla_modeling.R"))
 
 
 # ==============================================================================
@@ -111,8 +112,14 @@ df <- df[complete.cases(df[, ..columnas_necesarias])]
 if (!nrow(df)) stop("No quedan observaciones completas para ajustar los modelos.")
 
 # NOM_TIPO ya viene del maestro. Se fija "Suburbana" como categoria de
-# referencia; R creara automaticamente los indicadores de las demas.
+# referencia. Como la formula utiliza -1 + Intercept, se crean expresamente
+# dos indicadores para evitar introducir las tres categorias junto al
+# intercepto manual (una combinacion linealmente redundante).
 df[, NOM_TIPO := relevel(factor(NOM_TIPO), ref = "Suburbana")]
+df[, Tipo_Urbana_fondo := as.integer(NOM_TIPO == "Urbana fondo")]
+df[, Tipo_Urbana_trafico := as.integer(
+    NOM_TIPO != "Suburbana" & NOM_TIPO != "Urbana fondo"
+)]
 df[, y := get(RESPUESTA)]
 setorder(df, FECHA, ESTACION)
 
@@ -173,137 +180,27 @@ for (variable in COVARIABLES) {
 }
 efectos_fijos$Temperatura_rw2 <- df$Temperatura_rw2
 efectos_fijos$Velocidad_Viento_rw2 <- df$Velocidad_Viento_rw2
-efectos_fijos$NOM_TIPO <- df$NOM_TIPO
+efectos_fijos$Tipo_Urbana_fondo <- df$Tipo_Urbana_fondo
+efectos_fijos$Tipo_Urbana_trafico <- df$Tipo_Urbana_trafico
 
 # Un unico stack para todos los modelos, con el mismo campo espacial y
-stack_modelo <- inla.stack(
-    data = list(y_response = df$y),
-    A = list(A_espacial, 1),
-    effects = list(indice_espacial, efectos_fijos),
+stack_modelo <- crear_stack_inla_spde(
+    respuesta = df$y,
+    A_espacial = A_espacial,
+    indice_espacial = indice_espacial,
+    efectos_fijos = efectos_fijos,
     tag = "estimacion"
 )
 
-indices_observaciones <- inla.stack.index(
-    stack_modelo,
-    tag = "estimacion"
-)$data
+indices_observaciones <- indices_stack_inla(stack_modelo, "estimacion")
 
 
 # ==============================================================================
-# 5. MODELOS PARA LA SELECCION DE VARIABLES
+# 5. FUNCIONES COMUNES DE MODELIZACION
 # ==============================================================================
-# Esta funcion contiene las opciones comunes de INLA. La formula, el nombre y
-# la descripcion se indican expresamente al ajustar cada modelo.
-ajustar_modelo <- function(formula_modelo, id_modelo, descripcion) {
-    cat("\nAjustando ", id_modelo, ": ", descripcion, "...\n", sep = "")
-
-    modelo <- inla(
-        formula = formula_modelo,
-        data = inla.stack.data(stack_modelo, spde = spde),
-        family = FAMILIA,
-        verbose = VERBOSE_INLA,
-        num.threads = NUM_THREADS,
-        control.predictor = list(
-            A = inla.stack.A(stack_modelo),
-            compute = TRUE
-        ),
-        control.inla = list(
-            strategy = "gaussian",
-            int.strategy = "eb"
-        ),
-        control.compute = list(
-            dic = TRUE,
-            waic = TRUE,
-            cpo = FALSE,
-            openmp.strategy = "huge"
-        )
-    )
-
-    resumen_ajuste <- modelo$summary.fitted.values[
-        indices_observaciones, ,
-        drop = FALSE
-    ]
-    prediccion <- resumen_ajuste[, "mean"]
-    sd_ajuste <- resumen_ajuste[, "sd"]
-
-    # sd_ajuste solo recoge la incertidumbre de la media ajustada; se le suma
-    # la varianza residual gaussiana para que el intervalo sea comparable a
-    # una cobertura predictiva (ver R/utilities/metricas_predictivas.R).
-    metricas_ajuste <- calcular_rmse_cov95(
-        y_obs = df$y,
-        media_pred = prediccion,
-        sd_pred = sd_ajuste,
-        varianza_residual = varianza_residual_gaussiana(modelo)
-    )
-    rmse_inla <- metricas_ajuste$RMSE
-    cov95_inla <- metricas_ajuste$COV95
-
-    # Efectos lineales: un coeficiente por variable.
-    resumen_fijos <- modelo$summary.fixed
-    tabla_fijos <- data.table(
-        Variable = rownames(resumen_fijos),
-        Coeficiente = resumen_fijos[["mean"]],
-        IC95 = sprintf(
-            "[%.4f, %.4f]",
-            resumen_fijos[["0.025quant"]],
-            resumen_fijos[["0.975quant"]]
-        ),
-        Significativa_95 = fifelse(
-            resumen_fijos[["0.025quant"]] > 0 |
-                resumen_fijos[["0.975quant"]] < 0,
-            "Si",
-            "No"
-        )
-    )
-    tabla_fijos <- tabla_fijos[
-        Variable != "Intercept",
-        .(Variable, Coeficiente, IC95, Significativa_95)
-    ]
-
-    # Efectos RW2: no existe un coeficiente unico. Se guarda una fila por nivel
-    # de la curva y el criterio de exclusion de cero es solamente puntual.
-    posibles_rw2 <- paste0(names(N_GRUPOS_RW2), "_rw2")
-    nombres_rw2_modelo <- intersect(
-        posibles_rw2,
-        names(modelo$summary.random)
-    )
-    tabla_rw2 <- rbindlist(lapply(nombres_rw2_modelo, function(nombre_rw2) {
-        resumen_rw2 <- modelo$summary.random[[nombre_rw2]]
-        resultado <- data.table(
-            Modelo = id_modelo,
-            Descripcion = descripcion,
-            Variable = sub("_rw2$", "", nombre_rw2),
-            Tipo_efecto = "RW2",
-            Nivel_RW2 = resumen_rw2[["ID"]],
-            Coeficiente = resumen_rw2[["mean"]],
-            Q025 = resumen_rw2[["0.025quant"]],
-            Q975 = resumen_rw2[["0.975quant"]]
-        )
-        resultado[, IC95 := sprintf("[%.4f, %.4f]", Q025, Q975)]
-        resultado[, Significativa_95 := fifelse(
-            Q025 > 0 | Q975 < 0,
-            "Si (puntual)",
-            "No (puntual)"
-        )]
-        resultado
-    }), use.names = TRUE, fill = TRUE)
-
-    metricas <- data.table(
-        Modelo = id_modelo,
-        Descripcion = descripcion,
-        WAIC = modelo$waic$waic,
-        DIC = modelo$dic$dic,
-        RMSE_INLA_orientativo = rmse_inla,
-        COV95_INLA_orientativo = cov95_inla
-    )
-
-    list(
-        modelo = modelo,
-        metricas = metricas,
-        coeficientes = tabla_fijos,
-        curvas_rw2 = tabla_rw2
-    )
-}
+# crear_stack_inla_spde(), ajustar_modelo_inla() y las funciones de extraccion
+# se cargan desde R/modeling/inla_modeling.R. Aqui quedan solamente las
+# decisiones particulares de este estudio: datos, formulas y configuracion.
 
 # ==============================================================================
 # 6. FORMULAS
@@ -316,42 +213,43 @@ formula_M0 <- y_response ~ -1 + Intercept +
     intensidad + Humedad_Relativa + Radiacion_Solar +
     Temperatura + Velocidad_Viento_sqrt +
     Presion_Barometrica +
-    Llueve + NOM_TIPO +
+    Llueve + Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_espacial, model = spde)
 
 formula_M1 <- y_response ~ -1 + Intercept + Humedad_Relativa +
     Velocidad_Viento_sqrt +
-    Presion_Barometrica + NOM_TIPO +
+    Presion_Barometrica + Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     Llueve + intensidad +
     f(campo_espacial, model = spde)
 
 formula_M2 <- y_response ~ -1 + Intercept +
     intensidad + Humedad_Relativa + f(Velocidad_Viento_rw2, model = "rw2", scale.model = TRUE) +
     Presion_Barometrica +
-    Llueve + NOM_TIPO +
+    Llueve + Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_espacial, model = spde)
 
 formula_M3 <- y_response ~ -1 + Intercept +
     Temperatura + Velocidad_Viento_sqrt +
     Presion_Barometrica + intensidad +
-    Llueve + NOM_TIPO +
+    Llueve + Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_espacial, model = spde)
 
 formula_M4 <- y_response ~ -1 + Intercept +
     f(Temperatura_rw2, model = "rw2", scale.model = TRUE) +
     Velocidad_Viento_sqrt + intensidad +
     Presion_Barometrica +
-    Llueve + NOM_TIPO +
+    Llueve + Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_espacial, model = spde)
 
 formula_M5 <- y_response ~ -1 + Intercept +
     f(Temperatura_rw2, model = "rw2", scale.model = TRUE) +
     f(Velocidad_Viento_rw2, model = "rw2", scale.model = TRUE) +
     Presion_Barometrica + intensidad +
-    Llueve + NOM_TIPO +
+    Llueve + Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_espacial, model = spde)
 
-formula_M6 <- y_response ~ -1 + Intercept + intensidad + NOM_TIPO +
+formula_M6 <- y_response ~ -1 + Intercept + intensidad +
+    Tipo_Urbana_fondo + Tipo_Urbana_trafico +
     f(campo_espacial, model = spde)
 
 formula_M7 <- y_response ~ -1 + Intercept + Humedad_Relativa + Radiacion_Solar +
@@ -402,10 +300,18 @@ ajustes <- setNames(
     names(formulas_modelos)
 )
 for (id_modelo in names(formulas_modelos)) {
-    ajustes[[id_modelo]] <- ajustar_modelo(
+    ajustes[[id_modelo]] <- ajustar_modelo_inla(
         formula_modelo = formulas_modelos[[id_modelo]],
         id_modelo = id_modelo,
-        descripcion = descripcion_modelos[[id_modelo]]
+        descripcion = descripcion_modelos[[id_modelo]],
+        stack = stack_modelo,
+        spde = spde,
+        indices_observaciones = indices_observaciones,
+        y_observada = df$y,
+        nombres_rw2 = paste0(names(N_GRUPOS_RW2), "_rw2"),
+        familia = FAMILIA,
+        verbose = VERBOSE_INLA,
+        num_threads = NUM_THREADS
     )
 }
 
@@ -473,16 +379,14 @@ if (CALCULAR_HOLDOUT) {
     # pero su respuesta se sustituye por NA y no interviene en el ajuste.
     y_holdout <- copy(df$y)
     y_holdout[es_holdout] <- NA_real_
-    stack_holdout <- inla.stack(
-        data = list(y_response = y_holdout),
-        A = list(A_espacial, 1),
-        effects = list(indice_espacial, efectos_fijos),
+    stack_holdout <- crear_stack_inla_spde(
+        respuesta = y_holdout,
+        A_espacial = A_espacial,
+        indice_espacial = indice_espacial,
+        efectos_fijos = efectos_fijos,
         tag = "holdout"
     )
-    indices_stack_holdout <- inla.stack.index(
-        stack_holdout,
-        tag = "holdout"
-    )$data
+    indices_stack_holdout <- indices_stack_inla(stack_holdout, "holdout")
 
     cat("\n--- HOLD-OUT ESPACIAL ---\n")
     cat("Estaciones reservadas:\n")
@@ -495,98 +399,18 @@ if (CALCULAR_HOLDOUT) {
 
     resultados_holdout <- setNames(
         lapply(MODELOS_HOLDOUT, function(id_modelo) {
-            cat("\nAjustando hold-out de ", id_modelo, "...\n", sep = "")
-
-            modelo_holdout <- inla(
-                formula = formulas_modelos[[id_modelo]],
-                data = inla.stack.data(stack_holdout, spde = spde),
-                family = FAMILIA,
+            ajustar_holdout_espacial_inla(
+                formula_modelo = formulas_modelos[[id_modelo]],
+                id_modelo = id_modelo,
+                descripcion = descripcion_modelos[[id_modelo]],
+                stack = stack_holdout,
+                spde = spde,
+                indices_observaciones = indices_stack_holdout,
+                datos = df,
+                es_holdout = es_holdout,
+                familia = FAMILIA,
                 verbose = VERBOSE_INLA,
-                num.threads = NUM_THREADS,
-                control.predictor = list(
-                    A = inla.stack.A(stack_holdout),
-                    compute = TRUE
-                ),
-                control.inla = list(
-                    strategy = "gaussian",
-                    int.strategy = "eb"
-                ),
-                # WAIC y DIC no se necesitan en este segundo ajuste. Omitirlos
-                # reduce parte del trabajo adicional del hold-out.
-                control.compute = list(
-                    dic = FALSE,
-                    waic = FALSE,
-                    cpo = FALSE,
-                    openmp.strategy = "huge"
-                )
-            )
-
-            resumen_pred <- modelo_holdout$summary.fitted.values[
-                indices_stack_holdout, ,
-                drop = FALSE
-            ]
-            media_pred <- resumen_pred[, "mean"]
-            sd_media <- resumen_pred[, "sd"]
-            var_residual <- varianza_residual_gaussiana(modelo_holdout)
-            sd_predictiva <- sqrt(sd_media^2 + var_residual)
-            z_95 <- qnorm(0.975)
-
-            predicciones <- df[es_holdout, .(
-                Modelo = id_modelo,
-                ESTACION,
-                NOM_TIPO = as.character(NOM_TIPO),
-                FECHA,
-                Observado = y
-            )]
-            predicciones[, `:=`(
-                Predicho = media_pred[es_holdout],
-                SD_media = sd_media[es_holdout],
-                SD_predictiva = sd_predictiva[es_holdout]
-            )]
-            predicciones[, `:=`(
-                Limite_inferior_95 = Predicho - z_95 * SD_predictiva,
-                Limite_superior_95 = Predicho + z_95 * SD_predictiva,
-                Error = Predicho - Observado
-            )]
-            predicciones[, `:=`(
-                Dentro_IC95 = Observado >= Limite_inferior_95 &
-                    Observado <= Limite_superior_95,
-                Anchura_IC95 = Limite_superior_95 - Limite_inferior_95
-            )]
-
-            validas <- predicciones[
-                is.finite(Observado) & is.finite(Predicho) &
-                    is.finite(SD_predictiva)
-            ]
-            if (nrow(validas) == 0L) {
-                stop("No hay predicciones hold-out validas para ", id_modelo, ".")
-            }
-
-            global <- validas[, .(
-                Modelo = id_modelo,
-                Descripcion = descripcion_modelos[[id_modelo]],
-                RMSE_HOLDOUT = sqrt(mean(Error^2)),
-                MAE_HOLDOUT = mean(abs(Error)),
-                Sesgo_HOLDOUT = mean(Error),
-                COV95_HOLDOUT = 100 * mean(Dentro_IC95),
-                Anchura_media_IC95_HOLDOUT = mean(Anchura_IC95),
-                Observaciones_HOLDOUT = .N
-            )]
-
-            por_estacion <- validas[, .(
-                Observaciones = .N,
-                RMSE = sqrt(mean(Error^2)),
-                MAE = mean(abs(Error)),
-                Sesgo = mean(Error),
-                COV95 = 100 * mean(Dentro_IC95),
-                Anchura_media_IC95 = mean(Anchura_IC95)
-            ), by = .(Modelo, ESTACION, NOM_TIPO)]
-
-            list(
-                modelo = modelo_holdout,
-                global = global,
-                por_estacion = por_estacion,
-                predicciones = predicciones
+                num_threads = NUM_THREADS
             )
         }),
         MODELOS_HOLDOUT
