@@ -20,7 +20,7 @@ sf_use_s2(FALSE)
 # BLOCK 0: CONFIGURATION (Only change the paths here!)
 # ==============================================================================
 
-ANIO <- 2025
+ANIO <- 2022
 DIA_DIAGNOSTICO <- NULL
 HORA_DIAGNOSTICO <- NULL
 
@@ -364,7 +364,9 @@ dt_no2 <- merge(dt_no2, dt_est_geo, by = "ESTACION", all.x = TRUE)
 # ==============================================================================
 # BLOCK 4: METEOROLOGY INTERPOLATION (winning method per variable)
 # ==============================================================================
-coords_no2 <- unique(dt_no2[, .(ESTACION, LONGITUD, LATITUD)])
+# X_km/Y_km (Bloque 1) para que estaciones NO2 y meteorologicas se comparen
+# directamente en UTM 30N; las meteorologicas usan las del catalogo oficial.
+coords_no2 <- unique(dt_no2[, .(ESTACION, X_km, Y_km)])
 
 # ------------------------------------------------------------------------------
 # CONFIGURACIÓN DE LA INTERPOLACIÓN — es lo único que hay que tocar aquí.

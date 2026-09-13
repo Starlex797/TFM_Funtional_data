@@ -51,14 +51,12 @@ coordenadas_estaciones_diarias <- function(dt_ubicaciones) {
     )
   }
 
+  # LONGITUD/LATITUD del catalogo vienen con puntos de miles y un numero de
+  # decimales variable ("-37.122.567" frente a "-3.609.031" o "404.156"), asi
+  # que no se pueden parsear dividiendo por una potencia fija de 10. Se derivan
+  # de las coordenadas ETRS89 / UTM 30N (EPSG:25830), que si son fiables.
   ubicaciones <- as.data.table(copy(dt_ubicaciones))[, .(
     CODIGO_CORTO = as.integer(CODIGO_CORTO),
-    LONGITUD = suppressWarnings(
-      as.numeric(gsub("\\.", "", as.character(LONGITUD))) / 1e7
-    ),
-    LATITUD = suppressWarnings(
-      as.numeric(gsub("\\.", "", as.character(LATITUD))) / 1e7
-    ),
     X_km = suppressWarnings(
       as.numeric(gsub(",", ".", as.character(COORDENADA_X_ETRS89))) / 1000
     ),
@@ -66,6 +64,11 @@ coordenadas_estaciones_diarias <- function(dt_ubicaciones) {
       as.numeric(gsub(",", ".", as.character(COORDENADA_Y_ETRS89))) / 1000
     )
   )]
+  lonlat <- sf::st_coordinates(sf::st_transform(sf::st_as_sf(
+    as.data.frame(ubicaciones[, .(x = X_km * 1000, y = Y_km * 1000)]),
+    coords = c("x", "y"), crs = 25830, na.fail = FALSE
+  ), 4326))
+  ubicaciones[, `:=`(LONGITUD = lonlat[, 1], LATITUD = lonlat[, 2])]
 
   ubicaciones[, ESTACION := unname(
     nombres_estaciones_clima[as.character(CODIGO_CORTO)]

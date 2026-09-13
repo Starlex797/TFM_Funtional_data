@@ -222,13 +222,21 @@ limpiar_datos_metereo <- function(dt_bruto, dt_ubica) {
   # We extract the useful columns from the station locations table and convert them 
   # to numeric, handling any formatting issues (e.g., commas, dots).
   
+  # LONGITUD/LATITUD del catalogo vienen con puntos de miles y un numero de
+  # decimales variable ("-37.122.567" frente a "-3.609.031" o "404.156"), asi
+  # que no se pueden parsear dividiendo por una potencia fija de 10. Se derivan
+  # de las coordenadas ETRS89 / UTM 30N (EPSG:25830), que si son fiables.
   cols_utiles <- dt_ubica[, .(
     CODIGO_CORTO,
-    LONGITUD  = as.numeric(gsub("\\.", "", LONGITUD))  / 1e7,
-    LATITUD   = as.numeric(gsub("\\.", "", LATITUD))   / 1e7,
     X_km      = as.numeric(gsub(",", ".", COORDENADA_X_ETRS89)) / 1000,
     Y_km      = as.numeric(gsub(",", ".", COORDENADA_Y_ETRS89)) / 1000
   )]
+  lonlat <- sf::st_coordinates(sf::st_transform(sf::st_as_sf(
+    as.data.frame(cols_utiles[, .(x = X_km * 1000, y = Y_km * 1000)]),
+    coords = c("x", "y"), crs = 25830, na.fail = FALSE
+  ), 4326))
+  cols_utiles[, `:=`(LONGITUD = lonlat[, 1], LATITUD = lonlat[, 2])]
+  setcolorder(cols_utiles, c("CODIGO_CORTO", "LONGITUD", "LATITUD", "X_km", "Y_km"))
   
   # We merge the useful columns with the raw data, using the station code as the key.
   

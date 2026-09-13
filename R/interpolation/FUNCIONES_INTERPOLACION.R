@@ -11,6 +11,26 @@ library(gstat)
 library(data.table)
 library(here)
 
+#' Estaciones como sf proyectado (metros), una fila por estación
+#'
+#' Usa X_km/Y_km cuando existen: en los datos meteorológicos son las
+#' coordenadas ETRS89 / UTM 30N del catálogo oficial y no hace falta pasar por
+#' LONGITUD/LATITUD (que en el catálogo vienen con formato ambiguo). Solo si no
+#' hay X_km/Y_km se proyecta LONGITUD/LATITUD desde crs_orig.
+estaciones_sf_utm <- function(dt, crs_orig = 4326, crs_proj = 25830) {
+  if (all(c("X_km", "Y_km") %in% names(dt))) {
+    coords <- unique(dt[, .(ESTACION, X_m = X_km * 1000, Y_m = Y_km * 1000)])
+    sf_est <- st_as_sf(coords, coords = c("X_m", "Y_m"), crs = 25830)
+  } else {
+    coords <- unique(dt[, .(ESTACION, LONGITUD, LATITUD)])
+    sf_est <- st_as_sf(coords, coords = c("LONGITUD", "LATITUD"), crs = crs_orig)
+  }
+  if (anyDuplicated(coords$ESTACION)) {
+    stop("Hay estaciones con más de una coordenada distinta.")
+  }
+  st_transform(sf_est, crs_proj)
+}
+
 #' Interpolación IDW diaria de variables climáticas a ubicaciones objetivo
 #'
 #' Para cada fecha presente en dt_meteo, interpola espacialmente las variables
@@ -42,17 +62,11 @@ interpolar_idw_clima <- function(dt_meteo,
     stop("Ninguna de las variables solicitadas existe en dt_meteo: ", paste(variables, collapse = ", "))
   }
 
-  coords_objetivo <- unique(dt_objetivo[, .(ESTACION, LONGITUD, LATITUD)])
-  sf_objetivo <- st_as_sf(coords_objetivo,
-                          coords = c("LONGITUD", "LATITUD"),
-                          crs = crs_orig) |>
-    st_transform(crs = crs_proj)
+  sf_objetivo <- estaciones_sf_utm(dt_objetivo, crs_orig, crs_proj)
+  coords_objetivo <- data.table(ESTACION = sf_objetivo$ESTACION)
 
-  coords_meteo <- unique(dt_meteo[, .(ESTACION, LONGITUD, LATITUD)])
-  sf_meteo_base <- st_as_sf(coords_meteo,
-                            coords = c("LONGITUD", "LATITUD"),
-                            crs = crs_orig) |>
-    st_transform(crs = crs_proj)
+  sf_meteo_base <- estaciones_sf_utm(dt_meteo, crs_orig, crs_proj)
+  coords_meteo <- data.table(ESTACION = sf_meteo_base$ESTACION)
 
   if ("HORA" %in% names(dt_meteo)) {
     instantes <- unique(dt_meteo[, .(FECHA, HORA)])
@@ -165,22 +179,25 @@ comparar_interpolaciones_loocv <- function(
       .(
         FECHA,
         ESTACION,
-        LONGITUD,
-        LATITUD,
         VALOR = as.numeric(get(var_name))
       )
     ]
 
+    # Las coordenadas son fijas por estación y se expresan en metros UTM 25830
+    # (X_km/Y_km del catálogo si existen; si no, LONGITUD/LATITUD proyectadas).
+    sf_coords <- estaciones_sf_utm(
+      dt_meteo[ESTACION %in% unique(dt_var$ESTACION)]
+    )
+    xy <- st_coordinates(sf_coords)
+    dt_coords <- data.table(ESTACION = sf_coords$ESTACION, X = xy[, 1], Y = xy[, 2])
+
     # Estaciones co-localizadas: si dos comparten la ubicación exacta se
     # conserva solo una (la de más observaciones de esta variable), para que la
     # LOOCV no prediga una estación con su gemela a distancia cero.
-    conteo_estaciones <- dt_var[
-      , .(n = .N, LON = first(LONGITUD), LAT = first(LATITUD)),
-      by = ESTACION
-    ]
-    setorder(conteo_estaciones, LON, LAT, -n)
+    conteo_estaciones <- dt_coords[dt_var[, .(n = .N), by = ESTACION], on = "ESTACION"]
+    setorder(conteo_estaciones, X, Y, -n)
     estaciones_conservadas <- conteo_estaciones[
-      !duplicated(paste(LON, LAT)), ESTACION
+      !duplicated(paste(X, Y)), ESTACION
     ]
     if (length(estaciones_conservadas) < uniqueN(dt_var$ESTACION)) {
       dt_var <- dt_var[ESTACION %in% estaciones_conservadas]
@@ -194,21 +211,7 @@ comparar_interpolaciones_loocv <- function(
       next
     }
 
-    # Las coordenadas son fijas por estación. Se transforman una sola vez a
-    # UTM 25830 para que todas las distancias estén expresadas en metros.
-    dt_coords <- dt_var[
-      , .(LONGITUD = first(LONGITUD), LATITUD = first(LATITUD)),
-      by = ESTACION
-    ]
-    sf_coords <- st_as_sf(
-      dt_coords,
-      coords = c("LONGITUD", "LATITUD"),
-      crs = 4326
-    ) |>
-      st_transform(25830)
-    xy <- st_coordinates(sf_coords)
-    dt_coords[, `:=`(X = xy[, 1], Y = xy[, 2])]
-    dt_var <- dt_coords[dt_var, on = "ESTACION"]
+    dt_var <- dt_coords[dt_var, on = "ESTACION", nomatch = NULL]
 
     fechas <- sort(unique(dt_var$FECHA))
     resultados_dia <- vector("list", length(fechas))
@@ -369,13 +372,9 @@ pesos_ensemble_loocv <- function(dt_meteo, variable, k_vecinos = 3L,
   dt[, VALOR := as.numeric(get(variable))]
 
   # Distancias en metros entre estaciones (coordenadas fijas por estación).
-  dt_coords <- unique(dt[, .(ESTACION, LONGITUD, LATITUD)])
-  sf_c <- st_transform(
-    st_as_sf(dt_coords, coords = c("LONGITUD", "LATITUD"), crs = crs_orig),
-    crs_proj
-  )
+  sf_c <- estaciones_sf_utm(dt, crs_orig, crs_proj)
   xy <- st_coordinates(sf_c)
-  dt_coords[, `:=`(X = xy[, 1], Y = xy[, 2])]
+  dt_coords <- data.table(ESTACION = sf_c$ESTACION, X = xy[, 1], Y = xy[, 2])
   d_mat <- as.matrix(dist(as.matrix(dt_coords[, .(X, Y)])))
   rownames(d_mat) <- dt_coords$ESTACION
   colnames(d_mat) <- dt_coords$ESTACION
@@ -547,17 +546,12 @@ interpolar_clima_por_metodo <- function(dt_meteo, dt_objetivo,
     message(sprintf("  %-22s %-15s %s", cfg$variable[i], cfg$metodo[i], detalle))
   }
 
-  coords_obj <- unique(dt_objetivo[, .(ESTACION, LONGITUD, LATITUD)])
-  sf_obj <- st_transform(
-    st_as_sf(coords_obj, coords = c("LONGITUD", "LATITUD"), crs = crs_orig),
-    crs_proj
-  )
+  # X_km/Y_km (UTM 30N) si existen; LONGITUD/LATITUD solo como alternativa.
+  sf_obj <- estaciones_sf_utm(dt_objetivo, crs_orig, crs_proj)
+  coords_obj <- data.table(ESTACION = sf_obj$ESTACION)
 
-  coords_meteo <- unique(dt_meteo[, .(ESTACION, LONGITUD, LATITUD)])
-  sf_meteo_base <- st_transform(
-    st_as_sf(coords_meteo, coords = c("LONGITUD", "LATITUD"), crs = crs_orig),
-    crs_proj
-  )
+  sf_meteo_base <- estaciones_sf_utm(dt_meteo, crs_orig, crs_proj)
+  coords_meteo <- data.table(ESTACION = sf_meteo_base$ESTACION)
 
   # Pesos del ensemble (solo para variables cuyo método es Ensemble), con la k
   # propia de cada variable.

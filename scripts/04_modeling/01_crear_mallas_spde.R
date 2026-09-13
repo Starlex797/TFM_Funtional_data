@@ -61,16 +61,14 @@ bnd_outer <- inla.nonconvex.hull(coords_matriz, convex = -0.6, resolution = 50) 
 
 # Cutoff por variable climática = distancia entre las DOS estaciones más
 distancia_minima_variable <- function(variable) {
+  # X_km/Y_km: coordenadas ETRS89 / UTM 30N del catalogo, ya en km.
   coords_var <- unique(
-    dt_clima_2025[!is.na(get(variable)), .(ESTACION, LONGITUD, LATITUD)]
+    dt_clima_2025[!is.na(get(variable)), .(ESTACION, X_km, Y_km)]
   )
   if (nrow(coords_var) < 2) {
     stop("Menos de 2 estaciones miden '", variable, "': no se puede calcular un cutoff.")
   }
-  xy_km <- st_coordinates(st_transform(
-    st_as_sf(coords_var, coords = c("LONGITUD", "LATITUD"), crs = 4326), 25830
-  )) / 1000
-  min(dist(xy_km))
+  min(dist(as.matrix(coords_var[, .(X_km, Y_km)])))
 }
 
 # NO2
